@@ -199,7 +199,7 @@ def test_get_agent_not_found_returns_404(mock_fetch, client):
     resp = client.get(f"/v1/agents/{aid}", headers=AUTH)
 
     assert resp.status_code == 404
-    body = resp.json()["detail"]
+    body = resp.json()
     assert body["error"] == "not_found"
 
 
@@ -273,7 +273,7 @@ def test_update_agent_not_found_returns_404(mock_fetch, mock_execute, client):
     resp = client.patch(f"/v1/agents/{aid}", json={"name": "x"}, headers=AUTH)
 
     assert resp.status_code == 404
-    body = resp.json()["detail"]
+    body = resp.json()
     assert body["error"] == "not_found"
 
 
@@ -465,7 +465,7 @@ def test_update_archived_agent_409(mock_fetch, mock_execute, client):
 
     resp = client.patch(f"/v1/agents/{aid}", json={"name": "x"}, headers=AUTH)
     assert resp.status_code == 409
-    assert resp.json()["detail"]["error"] == "agent_archived"
+    assert resp.json()["error"] == "agent_archived"
     mock_execute.assert_not_awaited()
 
 

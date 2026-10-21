@@ -19,6 +19,8 @@ import uuid
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
+from app.audit import record_audit
+from app.auth import require_auth
 from app.db import execute, fetch_all, fetch_one
 from app.memory import (
     PreconditionFailed,
@@ -77,12 +79,13 @@ async def _ensure_store_exists(uid: uuid.UUID) -> None:
 
 
 @router.post("", status_code=201, response_model=Memory)
-async def create_memory(store_id: str, body: WriteMemoryRequest) -> Memory:
+async def create_memory(store_id: str, body: WriteMemoryRequest, request: Request) -> Memory:
     """Create or upsert a memory. Optional precondition matches HTTP
     ETag semantics: ``sha256=None`` requires the path to not yet exist;
     ``sha256=<hex>`` requires that to be the current head sha. Either
     direction's mismatch returns 412.
     """
+    ctx = require_auth(request)
     uid = _parse_store_uuid(store_id)
     await _ensure_store_exists(uid)
     writer = await get_memory_writer()
@@ -96,14 +99,19 @@ async def create_memory(store_id: str, body: WriteMemoryRequest) -> Memory:
         )
     except PreconditionFailed as exc:
         raise precondition_failed_response(exc) from exc
+    await record_audit(
+        "memory.written", "memory", str(result.memory.id), ctx=ctx,
+        detail={"store_id": store_id, "path": body.path},
+    )
     return result.memory
 
 
 @router.patch("", response_model=Memory)
-async def patch_memory(store_id: str, body: WriteMemoryRequest) -> Memory:
+async def patch_memory(store_id: str, body: WriteMemoryRequest, request: Request) -> Memory:
     """Same as POST. Kept as a separate verb so callers that want PUT-ish
     semantics can pick PATCH; both endpoints share one canonical writer.
     """
+    ctx = require_auth(request)
     uid = _parse_store_uuid(store_id)
     await _ensure_store_exists(uid)
     writer = await get_memory_writer()
@@ -117,6 +125,10 @@ async def patch_memory(store_id: str, body: WriteMemoryRequest) -> Memory:
         )
     except PreconditionFailed as exc:
         raise precondition_failed_response(exc) from exc
+    await record_audit(
+        "memory.written", "memory", str(result.memory.id), ctx=ctx,
+        detail={"store_id": store_id, "path": body.path},
+    )
     return result.memory
 
 
@@ -181,9 +193,10 @@ async def list_or_get_memory(
 
 
 @router.delete("", status_code=204)
-async def delete_memory(store_id: str, path: str = Query(...)) -> None:
+async def delete_memory(store_id: str, request: Request, path: str = Query(...)) -> None:
     """Soft-delete a memory by path. Writes an ``action='delete'`` version
     so the version chain stays intact for the 30-day retention window."""
+    ctx = require_auth(request)
     uid = _parse_store_uuid(store_id)
     await _ensure_store_exists(uid)
     validate_memory_path(path)
@@ -197,3 +210,7 @@ async def delete_memory(store_id: str, path: str = Query(...)) -> None:
                 "message": f"Memory at path {path!r} not found",
             },
         )
+    await record_audit(
+        "memory.deleted", "memory", version_id, ctx=ctx,
+        detail={"store_id": store_id, "path": path},
+    )

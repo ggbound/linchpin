@@ -20,8 +20,10 @@ import uuid
 from datetime import datetime, timezone
 
 import asyncpg
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
+from app.audit import record_audit
+from app.auth import AuthContext, require_auth
 from app.db import execute, fetch_all, fetch_one
 from app.models import (
     SKILL_BUNDLE_MAX_BYTES,
@@ -40,10 +42,9 @@ logger = logging.getLogger("linchpin-api")
 router = APIRouter(prefix="/skills", tags=["skills"])
 
 
-# Self-host is single-tenant; the workspace_id column is a forward-
-# looking placeholder. Mirrors memory_stores' approach until multi-
-# tenancy lands (post-v1.0).
-_DEFAULT_WORKSPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
+# Atlas C1 — the legacy ``workspace_id`` column now carries the caller's
+# project UUID (auth-injected tenant boundary). Kept the column name for
+# schema continuity; semantically it *is* project_id.
 
 
 def _row_to_skill(row: asyncpg.Record) -> Skill:
@@ -90,7 +91,10 @@ async def _persist_bundle(content: bytes, sha: str) -> str:
 
 
 @router.post("", response_model=Skill, status_code=201)
-async def upload_skill(bundle: UploadFile = File(...)) -> Skill:
+async def upload_skill(
+    bundle: UploadFile = File(...),
+    ctx: AuthContext = Depends(require_auth),
+) -> Skill:
     """Upload a skill bundle. Parses SKILL.md, validates the
     frontmatter, persists the archive on disk, and either inserts a
     new row or updates the existing one with the same ``name`` (the
@@ -121,13 +125,14 @@ async def upload_skill(bundle: UploadFile = File(...)) -> Skill:
     storage_rel = await _persist_bundle(content, sha)
     size_bytes = len(content)
     now = datetime.now(tz=timezone.utc)
+    project_uid = uuid.UUID(ctx.project_id)
 
     existing = await fetch_one(
         """
         SELECT * FROM skills
         WHERE workspace_id = $1 AND name = $2 AND archived_at IS NULL
         """,
-        _DEFAULT_WORKSPACE,
+        project_uid,
         name,
     )
     if existing is not None:
@@ -158,12 +163,16 @@ async def upload_skill(bundle: UploadFile = File(...)) -> Skill:
             uuid.uuid4(),
             name,
             description,
-            _DEFAULT_WORKSPACE,
+            project_uid,
             sha,
             size_bytes,
             storage_rel,
             now,
         )
+    await record_audit(
+        "skill.uploaded", "skill", str(row["id"]), ctx=ctx,
+        detail={"name": name, "bundle_sha256": sha, "size_bytes": size_bytes},
+    )
     return _row_to_skill(row)
 
 
@@ -172,8 +181,10 @@ async def list_skills(
     include_archived: bool = Query(default=False),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    ctx: AuthContext = Depends(require_auth),
 ) -> SkillListResponse:
     """List skills in the workspace. Live-only by default."""
+    project_uid = uuid.UUID(ctx.project_id)
     if include_archived:
         rows = await fetch_all(
             """
@@ -182,7 +193,7 @@ async def list_skills(
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
             """,
-            _DEFAULT_WORKSPACE,
+            project_uid,
             limit + 1,
             offset,
         )
@@ -194,7 +205,7 @@ async def list_skills(
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
             """,
-            _DEFAULT_WORKSPACE,
+            project_uid,
             limit + 1,
             offset,
         )
@@ -208,9 +219,16 @@ async def list_skills(
 
 
 @router.get("/{skill_id}", response_model=Skill)
-async def get_skill(skill_id: str) -> Skill:
+async def get_skill(
+    skill_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> Skill:
     uid = _parse_uuid(skill_id)
-    row = await fetch_one("SELECT * FROM skills WHERE id = $1", uid)
+    row = await fetch_one(
+        "SELECT * FROM skills WHERE id = $1 AND workspace_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
+    )
     if row is None:
         raise HTTPException(
             status_code=404,
@@ -220,13 +238,21 @@ async def get_skill(skill_id: str) -> Skill:
 
 
 @router.delete("/{skill_id}", response_model=Skill)
-async def delete_skill(skill_id: str) -> Skill:
+async def delete_skill(
+    skill_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> Skill:
     """Soft-delete a skill (sets ``archived_at``). The bundle stays on
     disk in case it's still referenced by an agent's ``skills[]`` from
     a prior version; GC of orphaned bundles is a future concern.
     """
     uid = _parse_uuid(skill_id)
-    row = await fetch_one("SELECT * FROM skills WHERE id = $1", uid)
+    project_uid = uuid.UUID(ctx.project_id)
+    row = await fetch_one(
+        "SELECT * FROM skills WHERE id = $1 AND workspace_id = $2",
+        uid,
+        project_uid,
+    )
     if row is None:
         raise HTTPException(
             status_code=404,
@@ -237,8 +263,10 @@ async def delete_skill(skill_id: str) -> Skill:
     updated = await fetch_one(
         """
         UPDATE skills SET archived_at = NOW(), updated_at = NOW()
-        WHERE id = $1 RETURNING *
+        WHERE id = $1 AND workspace_id = $2 RETURNING *
         """,
         uid,
+        project_uid,
     )
+    await record_audit("skill.archived", "skill", skill_id, ctx=ctx)
     return _row_to_skill(updated)

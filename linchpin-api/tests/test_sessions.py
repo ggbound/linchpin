@@ -99,6 +99,11 @@ def sandbox_client(tmp_path):
         patch("app.routes.sessions.run_session", new_callable=AsyncMock) as mock_run_session,
         patch("app.routes.sessions.ensure_session_outputs_dir", side_effect=_fake_ensure),
         patch("app.routes.sessions.watch_session_deliverables", new_callable=AsyncMock),
+        # Atlas A2/A6 — create/archive success paths now write DB state
+        # (container_id bind, transition→running, deprecation events).
+        patch("app.routes.sessions.execute", new_callable=AsyncMock),
+        patch("app.routes.sessions.transition", new_callable=AsyncMock),
+        patch("app.routes.sessions.append_event", new_callable=AsyncMock),
     ):
         mock_sandbox = MagicMock()
         mock_sandbox.create = AsyncMock(return_value="container-abc")
@@ -129,7 +134,8 @@ def test_create_session_returns_201(mock_fetch, sandbox_client):
     session_row = _make_session_row(agent_id=agent_id, environment_id=env_id)
 
     # fetch_one is called: agent lookup, env lookup, INSERT RETURNING
-    mock_fetch.side_effect = [agent_row, env_row, session_row]
+    # 4th element: post-transition row refresh (Atlas A2).
+    mock_fetch.side_effect = [agent_row, env_row, session_row, session_row]
 
     payload = {"agent_id": agent_id, "environment_id": env_id}
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
@@ -155,7 +161,8 @@ def test_create_session_unrestricted_network(mock_fetch, sandbox_client):
     env_row = _make_env_row(env_id=env_id, net_type="unrestricted")
     session_row = _make_session_row(agent_id=agent_id, environment_id=env_id)
 
-    mock_fetch.side_effect = [agent_row, env_row, session_row]
+    # 4th element: post-transition row refresh (Atlas A2).
+    mock_fetch.side_effect = [agent_row, env_row, session_row, session_row]
 
     payload = {"agent_id": agent_id, "environment_id": env_id}
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
@@ -185,7 +192,8 @@ def test_create_session_none_network(mock_fetch, sandbox_client):
     env_row = _make_env_row(env_id=env_id, net_type="none")
     session_row = _make_session_row(agent_id=agent_id, environment_id=env_id)
 
-    mock_fetch.side_effect = [agent_row, env_row, session_row]
+    # 4th element: post-transition row refresh (Atlas A2).
+    mock_fetch.side_effect = [agent_row, env_row, session_row, session_row]
 
     payload = {"agent_id": agent_id, "environment_id": env_id}
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
@@ -198,8 +206,9 @@ def test_create_session_none_network(mock_fetch, sandbox_client):
     assert kwargs["mounts"][0].container_path == "/mnt/session/outputs"
 
 
+@patch("app.routes.sessions.proxy_env_from_networking")
 @patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
-def test_create_session_limited_network(mock_fetch, sandbox_client):
+def test_create_session_limited_network(mock_fetch, mock_proxy_env, sandbox_client):
     """v0.2.0 item #4 — limited mode routes to linchpin-limited network."""
     client, mock_sandbox = sandbox_client
     agent_id = str(uuid.uuid4())
@@ -223,7 +232,13 @@ def test_create_session_limited_network(mock_fetch, sandbox_client):
     }
     session_row = _make_session_row(agent_id=agent_id, environment_id=env_id)
 
-    mock_fetch.side_effect = [agent_row, env_row, session_row]
+    # 4th element: post-transition row refresh (Atlas A2).
+    mock_fetch.side_effect = [agent_row, env_row, session_row, session_row]
+
+    # Atlas B4 — the env's egress proxy boots before the sandbox and its
+    # env vars ride into the session container.
+    proxy_name = "linchpin-egress-" + env_id.replace("-", "")[:12]
+    mock_proxy_env.return_value = {"HTTP_PROXY": f"http://{proxy_name}:3128"}
 
     payload = {"agent_id": agent_id, "environment_id": env_id}
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
@@ -232,6 +247,10 @@ def test_create_session_limited_network(mock_fetch, sandbox_client):
     args, kwargs = mock_sandbox.create.call_args
     from app.sandbox import DEFAULT_BASE_IMAGE
     assert args == (DEFAULT_BASE_IMAGE, "linchpin-limited")
+    assert kwargs["env"] == {"HTTP_PROXY": f"http://{proxy_name}:3128"}
+    mock_proxy_env.assert_called_once()
+    assert mock_proxy_env.call_args.args[0] == env_id
+    assert mock_proxy_env.call_args.args[1]["allowed_hosts"] == ["api.github.com"]
 
 
 @patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
@@ -244,7 +263,7 @@ def test_create_session_agent_not_found(mock_fetch, sandbox_client):
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
 
     assert resp.status_code == 404
-    assert resp.json()["detail"]["error"] == "not_found"
+    assert resp.json()["error"] == "not_found"
 
 
 @patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
@@ -259,7 +278,7 @@ def test_create_session_env_not_found(mock_fetch, sandbox_client):
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
 
     assert resp.status_code == 404
-    assert "Environment" in resp.json()["detail"]["message"]
+    assert "Environment" in resp.json()["message"]
 
 
 def test_create_session_missing_agent_id_returns_422(sandbox_client):
@@ -276,6 +295,316 @@ def test_create_session_missing_env_id_returns_422(sandbox_client):
     payload = {"agent_id": str(uuid.uuid4())}
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
     assert resp.status_code == 422
+
+
+# ---- Atlas B8 — x-events-encrypted envelope encryption ----
+
+
+@patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
+def test_create_session_with_events_encrypted(mock_fetch, sandbox_client, monkeypatch):
+    """B8 — ``x-events-encrypted: true`` persists a wrapped per-session
+    data key and memoizes the plaintext key for the event writers."""
+    from cryptography.fernet import Fernet
+
+    from app import event_crypto
+    from app.encryption import reset_encryption_service
+
+    monkeypatch.setenv("VAULT_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    reset_encryption_service()
+    try:
+        client, _ = sandbox_client
+        agent_id = str(uuid.uuid4())
+        env_id = str(uuid.uuid4())
+
+        agent_row = _make_agent_row(agent_id=agent_id)
+        env_row = _make_env_row(env_id=env_id)
+        session_row = _make_session_row(agent_id=agent_id, environment_id=env_id)
+        session_row["events_encrypted"] = True  # INSERT RETURNING * shape
+
+        mock_fetch.side_effect = [agent_row, env_row, session_row, session_row]
+
+        headers = {**AUTH, "x-events-encrypted": "true"}
+        resp = client.post(
+            "/v1/sessions",
+            json={"agent_id": agent_id, "environment_id": env_id},
+            headers=headers,
+        )
+
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["events_encrypted"] is True
+
+        # 3rd fetch_one call is the sessions INSERT — it must bind the
+        # flag (arg 14) and a wrapped key (arg 15) under its new columns.
+        insert_call = mock_fetch.call_args_list[2]
+        sql = insert_call.args[0]
+        assert "events_encrypted" in sql and "data_key" in sql
+        assert insert_call.args[14] is True
+        wrapped = insert_call.args[15]
+        assert isinstance(wrapped, str) and wrapped
+
+        # The plaintext key is memoized in-process under the INSERT's own
+        # session id ($1 — the mocked RETURNING row carries a throwaway id,
+        # so the cache key must be read from the bound args) and unwraps
+        # to match the wrapped copy.
+        insert_sid = insert_call.args[1]
+        assert event_crypto._data_key_cache[insert_sid] != wrapped
+        from app.event_crypto import unwrap_data_key
+
+        assert unwrap_data_key(wrapped) == event_crypto._data_key_cache[insert_sid]
+        # Cleanup — drop the memoized key for this throwaway session.
+        event_crypto.drop_session_data_key(str(insert_sid))
+    finally:
+        reset_encryption_service()
+
+
+@patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
+def test_create_session_defaults_to_plaintext_events(mock_fetch, sandbox_client):
+    """Without the header, no data key is generated and the flag is false."""
+    from app import event_crypto
+
+    client, _ = sandbox_client
+    agent_id = str(uuid.uuid4())
+    env_id = str(uuid.uuid4())
+
+    agent_row = _make_agent_row(agent_id=agent_id)
+    env_row = _make_env_row(env_id=env_id)
+    session_row = _make_session_row(agent_id=agent_id, environment_id=env_id)
+
+    mock_fetch.side_effect = [agent_row, env_row, session_row, session_row]
+
+    resp = client.post(
+        "/v1/sessions",
+        json={"agent_id": agent_id, "environment_id": env_id},
+        headers=AUTH,
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["events_encrypted"] is False
+
+    insert_call = mock_fetch.call_args_list[2]
+    assert insert_call.args[14] is False
+    assert insert_call.args[15] is None
+    # Nothing memoized for a plaintext session.
+    assert uuid.UUID(resp.json()["id"]) not in event_crypto._data_key_cache
+
+
+@patch("app.routes.sessions.execute", new_callable=AsyncMock)
+@patch("app.routes.sessions.fetch_all", new_callable=AsyncMock)
+@patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
+def test_terminate_session_drops_data_key_cache(
+    mock_fetch, mock_fetch_all, mock_execute, sandbox_client
+):
+    """B8 — terminating an encrypted session evicts its memoized key."""
+    from app import event_crypto
+
+    client, _ = sandbox_client
+    sid = str(uuid.uuid4())
+    existing = _make_session_row(session_id=sid)
+    terminated = {**existing, "status": "terminated"}
+
+    event_crypto.cache_session_data_key(sid, generate_test_data_key())
+    mock_fetch.side_effect = [existing, terminated]
+    mock_fetch_all.return_value = []
+
+    resp = client.delete(f"/v1/sessions/{sid}", headers=AUTH)
+
+    assert resp.status_code == 200
+    assert uuid.UUID(sid) not in event_crypto._data_key_cache
+
+
+def generate_test_data_key():
+    """Local helper — a fresh Fernet data key (B8 shape)."""
+    from app.event_crypto import generate_data_key
+
+    return generate_data_key()
+
+
+# ---- Atlas M6 BYOK — x-kek-credential-id customer key wrapping ----
+
+
+def _make_credential_row(*, vault_id: str | None = None):
+    return {
+        "id": uuid.uuid4(),
+        "vault_id": uuid.UUID(vault_id) if vault_id else uuid.uuid4(),
+        "credential_type": "byok_kek",
+        "mcp_server_url": None,
+        "provider": None,
+        "client_id": None,
+    }
+
+
+@patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
+def test_create_session_byok_wraps_under_client_kek(mock_fetch, monkeypatch, sandbox_client):
+    """M6 — with both headers, the data key is sealed under the customer's
+    KEK and stored as the byok1 JSON envelope naming the credential."""
+    from cryptography.fernet import Fernet
+
+    from app import event_crypto
+    from app.encryption import reset_encryption_service
+
+    monkey_kek = Fernet.generate_key().decode()
+    monkeypatch.setenv("VAULT_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    reset_encryption_service()
+    try:
+        client, _ = sandbox_client
+        agent_id = str(uuid.uuid4())
+        env_id = str(uuid.uuid4())
+        cred_id = str(uuid.uuid4())
+
+        agent_row = _make_agent_row(agent_id=agent_id)
+        env_row = _make_env_row(env_id=env_id)
+        session_row = _make_session_row(agent_id=agent_id, environment_id=env_id)
+        session_row["events_encrypted"] = True
+
+        mock_fetch.side_effect = [agent_row, env_row, session_row, session_row]
+
+        with patch(
+            "app.routes.sessions._resolve_kek_credential",
+            new_callable=AsyncMock,
+            return_value=monkey_kek,
+        ):
+            resp = client.post(
+                "/v1/sessions",
+                json={"agent_id": agent_id, "environment_id": env_id},
+                headers={
+                    **AUTH,
+                    "x-events-encrypted": "true",
+                    "x-kek-credential-id": cred_id,
+                },
+            )
+
+        assert resp.status_code == 201
+        assert resp.json()["events_encrypted"] is True
+
+        insert_call = mock_fetch.call_args_list[2]
+        assert insert_call.args[14] is True
+        envelope = json.loads(insert_call.args[15])
+        assert envelope["enc"] == "byok1"
+        assert envelope["kid"] == cred_id
+
+        # The memoized plaintext key unwraps under the customer KEK.
+        from app.event_crypto import unwrap_data_key
+
+        insert_sid = insert_call.args[1]
+        assert (
+            unwrap_data_key(
+                insert_call.args[15], kek=monkey_kek
+            )
+            == event_crypto._data_key_cache[insert_sid]
+        )
+        event_crypto.drop_session_data_key(str(insert_sid))
+    finally:
+        reset_encryption_service()
+
+
+@patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
+def test_create_session_byok_credential_missing_returns_404(
+    mock_fetch, sandbox_client
+):
+    client, _ = sandbox_client
+    agent_id = str(uuid.uuid4())
+    env_id = str(uuid.uuid4())
+
+    mock_fetch.side_effect = [_make_agent_row(agent_id=agent_id),
+                              _make_env_row(env_id=env_id),
+                              None]  # KEK credential lookup misses
+
+    resp = client.post(
+        "/v1/sessions",
+        json={"agent_id": agent_id, "environment_id": env_id},
+        headers={
+            **AUTH,
+            "x-events-encrypted": "true",
+            "x-kek-credential-id": str(uuid.uuid4()),
+        },
+    )
+
+    assert resp.status_code == 404
+    assert resp.json()["error"] == "not_found"
+
+
+@patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
+def test_create_session_byok_kek_vault_not_authorized_returns_422(
+    mock_fetch, sandbox_client
+):
+    """A KEK credential whose vault is not in vault_ids is refused."""
+    client, _ = sandbox_client
+    agent_id = str(uuid.uuid4())
+    env_id = str(uuid.uuid4())
+    cred_row = _make_credential_row()  # vault_id ∉ body.vault_ids (empty)
+
+    mock_fetch.side_effect = [_make_agent_row(agent_id=agent_id),
+                              _make_env_row(env_id=env_id),
+                              cred_row]
+
+    resp = client.post(
+        "/v1/sessions",
+        json={"agent_id": agent_id, "environment_id": env_id},
+        headers={
+            **AUTH,
+            "x-events-encrypted": "true",
+            "x-kek-credential-id": str(cred_row["id"]),
+        },
+    )
+
+    assert resp.status_code == 422
+    assert resp.json()["error"] == "validation_error"
+
+
+@patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
+def test_create_session_byok_invalid_credential_id_returns_422(
+    mock_fetch, sandbox_client
+):
+    client, _ = sandbox_client
+    agent_id = str(uuid.uuid4())
+    env_id = str(uuid.uuid4())
+
+    mock_fetch.side_effect = [_make_agent_row(agent_id=agent_id),
+                              _make_env_row(env_id=env_id)]
+
+    resp = client.post(
+        "/v1/sessions",
+        json={"agent_id": agent_id, "environment_id": env_id},
+        headers={
+            **AUTH,
+            "x-events-encrypted": "true",
+            "x-kek-credential-id": "not-a-uuid",
+        },
+    )
+
+    assert resp.status_code == 422
+    assert resp.json()["error"] == "validation_error"
+
+
+@patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
+def test_create_session_byok_without_encrypted_flag_stays_plaintext(
+    mock_fetch, sandbox_client
+):
+    """x-kek-credential-id alone (no x-events-encrypted) does not opt in,
+    and the KEK credential is never resolved."""
+    client, _ = sandbox_client
+    agent_id = str(uuid.uuid4())
+    env_id = str(uuid.uuid4())
+
+    session_row = _make_session_row(agent_id=agent_id, environment_id=env_id)
+    mock_fetch.side_effect = [
+        _make_agent_row(agent_id=agent_id),
+        _make_env_row(env_id=env_id),
+        session_row, session_row,
+    ]
+
+    resp = client.post(
+        "/v1/sessions",
+        json={"agent_id": agent_id, "environment_id": env_id},
+        headers={**AUTH, "x-kek-credential-id": str(uuid.uuid4())},
+    )
+
+    assert resp.status_code == 201
+    assert resp.json()["events_encrypted"] is False
+    insert_call = mock_fetch.call_args_list[2]
+    assert insert_call.args[14] is False
+    assert insert_call.args[15] is None
 
 
 # ---- GET /v1/sessions/{id} ----
@@ -308,7 +637,7 @@ def test_get_session_not_found(mock_fetch, sandbox_client):
     resp = client.get(f"/v1/sessions/{uuid.uuid4()}", headers=AUTH)
 
     assert resp.status_code == 404
-    assert resp.json()["detail"]["error"] == "not_found"
+    assert resp.json()["error"] == "not_found"
 
 
 def test_get_session_invalid_uuid(sandbox_client):
@@ -560,9 +889,12 @@ def test_archive_session(mock_fetch, mock_fetch_all, sandbox_client):
     assert resp.json()["archived_at"] is not None
 
 
+@patch("app.routes.sessions.fetch_all", new_callable=AsyncMock)
 @patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
-def test_archive_session_already_archived_returns_409(mock_fetch, sandbox_client):
-    """Archiving an already-archived session returns 409."""
+def test_archive_session_already_archived_is_idempotent(
+    mock_fetch, mock_fetch_all, sandbox_client
+):
+    """Atlas A6 — archiving an already-archived session is idempotent (200)."""
     client, _ = sandbox_client
     sid = str(uuid.uuid4())
     existing = _make_session_row(
@@ -570,11 +902,12 @@ def test_archive_session_already_archived_returns_409(mock_fetch, sandbox_client
         archived_at=datetime(2025, 5, 1, tzinfo=timezone.utc),
     )
     mock_fetch.return_value = existing
+    mock_fetch_all.return_value = []
 
     resp = client.post(f"/v1/sessions/{sid}/archive", headers=AUTH)
 
-    assert resp.status_code == 409
-    assert resp.json()["detail"]["error"] == "conflict"
+    assert resp.status_code == 200
+    assert resp.json()["archived_at"] is not None
 
 
 @patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
@@ -680,7 +1013,7 @@ def test_post_events_session_not_found(mock_fetch, sandbox_client):
     resp = client.post(f"/v1/sessions/{uuid.uuid4()}/events", json=payload, headers=AUTH)
 
     assert resp.status_code == 404
-    assert resp.json()["detail"]["error"] == "not_found"
+    assert resp.json()["error"] == "not_found"
 
 
 @patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
@@ -698,7 +1031,7 @@ def test_post_events_archived_session_returns_409(mock_fetch, sandbox_client):
     resp = client.post(f"/v1/sessions/{sid}/events", json=payload, headers=AUTH)
 
     assert resp.status_code == 409
-    assert resp.json()["detail"]["error"] == "conflict"
+    assert resp.json()["error"] == "conflict"
 
 
 def test_post_events_invalid_event_type_returns_422(sandbox_client):
@@ -789,9 +1122,9 @@ def test_get_events_422_on_unknown_type(mock_fetch_one, sandbox_client):
         headers=AUTH,
     )
     assert resp.status_code == 422
-    detail = resp.json()["detail"]
-    assert detail["error"] == "invalid_event_type"
-    assert detail["invalid"] == ["nope.not.real"]
+    body = resp.json()
+    assert body["error"] == "invalid_event_type"
+    assert body["detail"]["invalid"] == ["nope.not.real"]
 
 
 @patch("app.routes.sessions.get_events", new_callable=AsyncMock)
@@ -851,7 +1184,10 @@ def test_create_session_with_valid_vault_ids(mock_fetch, sandbox_client):
     )
 
     # fetch_one calls: agent, env, vault check, INSERT RETURNING
-    mock_fetch.side_effect = [agent_row, env_row, vault_row, session_row]
+    # 5th element: post-transition row refresh (Atlas A2).
+    mock_fetch.side_effect = [
+        agent_row, env_row, vault_row, session_row, session_row,
+    ]
 
     payload = {"agent_id": agent_id, "environment_id": env_id, "vault_ids": [vault_id]}
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
@@ -879,7 +1215,7 @@ def test_create_session_vault_not_found_returns_422(mock_fetch, sandbox_client):
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
 
     assert resp.status_code == 422
-    assert "not found" in resp.json()["detail"]["message"].lower()
+    assert "not found" in resp.json()["message"].lower()
 
 
 @patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
@@ -904,7 +1240,7 @@ def test_create_session_archived_vault_returns_422(mock_fetch, sandbox_client):
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
 
     assert resp.status_code == 422
-    assert "archived" in resp.json()["detail"]["message"].lower()
+    assert "archived" in resp.json()["message"].lower()
 
 
 @patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
@@ -924,7 +1260,7 @@ def test_create_session_invalid_vault_uuid_returns_422(mock_fetch, sandbox_clien
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
 
     assert resp.status_code == 422
-    assert "invalid vault id" in resp.json()["detail"]["message"].lower()
+    assert "invalid vault id" in resp.json()["message"].lower()
 
 
 @patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
@@ -938,7 +1274,8 @@ def test_create_session_empty_vault_ids_succeeds(mock_fetch, sandbox_client):
     env_row = _make_env_row(env_id=env_id)
     session_row = _make_session_row(agent_id=agent_id, environment_id=env_id)
 
-    mock_fetch.side_effect = [agent_row, env_row, session_row]
+    # 4th element: post-transition row refresh (Atlas A2).
+    mock_fetch.side_effect = [agent_row, env_row, session_row, session_row]
 
     payload = {"agent_id": agent_id, "environment_id": env_id, "vault_ids": []}
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
@@ -986,6 +1323,8 @@ def test_create_session_legacy_vault_ids_sets_deprecation_header(
         _make_env_row(env_id=env_id),
         {"id": uuid.UUID(vault_id), "archived_at": None},
         _make_session_row(agent_id=agent_id, environment_id=env_id, vault_ids=[vault_id]),
+        # 5th element: post-transition row refresh (Atlas A2).
+        _make_session_row(agent_id=agent_id, environment_id=env_id, vault_ids=[vault_id]),
     ]
     mock_fetch_all.return_value = []
 
@@ -1020,6 +1359,8 @@ def test_create_session_vault_resource_no_deprecation(
         _make_agent_row(agent_id=agent_id),
         _make_env_row(env_id=env_id),
         {"id": uuid.UUID(vault_id), "archived_at": None},
+        _make_session_row(agent_id=agent_id, environment_id=env_id, vault_ids=[vault_id]),
+        # 5th element: post-transition row refresh (Atlas A2).
         _make_session_row(agent_id=agent_id, environment_id=env_id, vault_ids=[vault_id]),
     ]
     mock_fetch_all.return_value = []
@@ -1059,6 +1400,8 @@ def test_create_session_both_shapes_dedupe_to_one_vault(
         _make_agent_row(agent_id=agent_id),
         _make_env_row(env_id=env_id),
         {"id": uuid.UUID(vault_id), "archived_at": None},
+        _make_session_row(agent_id=agent_id, environment_id=env_id, vault_ids=[vault_id]),
+        # 5th element: post-transition row refresh (Atlas A2).
         _make_session_row(agent_id=agent_id, environment_id=env_id, vault_ids=[vault_id]),
     ]
     mock_fetch_all.return_value = []

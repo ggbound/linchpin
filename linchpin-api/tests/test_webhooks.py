@@ -241,7 +241,12 @@ class TestEnqueueEvent:
 
     @pytest.mark.asyncio
     async def test_inserts_one_row_per_matching_endpoint(self, monkeypatch):
-        endpoints = [{"id": uuid.uuid4()}, {"id": uuid.uuid4()}]
+        # Atlas A7 — rows carry enabled_events and the event must be
+        # explicitly subscribed (Python-side filter mirrors the SQL).
+        endpoints = [
+            {"id": uuid.uuid4(), "enabled_events": ["session.created"]},
+            {"id": uuid.uuid4(), "enabled_events": ["session.created"]},
+        ]
         insert_calls = []
 
         async def fake_fetch_all(sql, *args):

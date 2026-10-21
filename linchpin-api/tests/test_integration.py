@@ -113,6 +113,8 @@ def lifecycle_client(tmp_path):
         patch("app.main.DockerSandbox") as MockSandbox,
         patch("app.main.cleanup_expired_sessions", new_callable=AsyncMock),
         patch("app.main.recover_sessions", new_callable=AsyncMock),
+        # Atlas A8 — keep the idempotency-key cleanup loop out of test logs.
+        patch("app.main.idempotency_cleanup_loop", new_callable=AsyncMock),
         patch("app.routes.sessions.run_session", new_callable=AsyncMock),
         patch("app.routes.sessions.ensure_session_outputs_dir", side_effect=_fake_ensure),
         patch("app.routes.sessions.watch_session_deliverables", new_callable=AsyncMock),
@@ -141,6 +143,7 @@ class TestSessionLifecycle:
     Validates: Requirements 1.1, 3.1, 5.1, 9.1, 6.5
     """
 
+    @patch("app.routes.sessions.transition", new_callable=AsyncMock)
     @patch("app.routes.sessions.notify", new_callable=AsyncMock)
     @patch("app.routes.sessions.execute", new_callable=AsyncMock)
     @patch("app.routes.sessions.append_event", new_callable=AsyncMock)
@@ -161,6 +164,7 @@ class TestSessionLifecycle:
         mock_append,
         _mock_session_execute,
         mock_notify,
+        mock_transition,
         lifecycle_client,
     ):
         """End-to-end: create agent, create env, create session, post event, terminate."""
@@ -204,7 +208,7 @@ class TestSessionLifecycle:
 
         # --- Step 3: Create session ---
         # session fetch_one: agent lookup, env lookup, INSERT RETURNING
-        mock_session_fetch.side_effect = [agent, env, session]
+        mock_session_fetch.side_effect = [agent, env, session, session]
         resp = client.post(
             "/v1/sessions",
             json={"agent_id": agent_id, "environment_id": env_id},
@@ -251,11 +255,16 @@ class TestSessionLifecycle:
         # --- Step 5: Terminate session ---
         terminated = {**session, "status": "terminated"}
         mock_session_fetch.side_effect = [session, terminated]
+        # Atlas B12 — terminate purges session-scoped files via fetch_all;
+        # none exist in this scenario.
+        mock_session_fetch_all.return_value = []
         resp = client.delete(f"/v1/sessions/{session_id}", headers=AUTH)
         assert resp.status_code == 200
         assert resp.json()["status"] == "terminated"
         mock_sandbox.destroy.assert_called_once_with("container-integ")
 
+    @patch("app.routes.sessions.transition", new_callable=AsyncMock)
+    @patch("app.routes.sessions.execute", new_callable=AsyncMock)
     @patch("app.routes.sessions.notify", new_callable=AsyncMock)
     @patch("app.routes.sessions.append_event", new_callable=AsyncMock)
     @patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
@@ -268,6 +277,8 @@ class TestSessionLifecycle:
         mock_session_fetch,
         mock_append,
         mock_notify,
+        mock_execute,
+        mock_transition,
         lifecycle_client,
     ):
         """Session created with unrestricted env uses linchpin-open network."""
@@ -304,7 +315,7 @@ class TestSessionLifecycle:
         assert resp.status_code == 201
 
         # Create session — should use linchpin-open
-        mock_session_fetch.side_effect = [agent, env, session]
+        mock_session_fetch.side_effect = [agent, env, session, session]
         resp = client.post(
             "/v1/sessions",
             json={"agent_id": agent_id, "environment_id": env_id},
@@ -391,7 +402,7 @@ class TestSessionLifecycle:
             headers=AUTH,
         )
         assert resp.status_code == 409
-        assert resp.json()["detail"]["error"] == "conflict"
+        assert resp.json()["error"] == "conflict"
 
     def test_unauthenticated_requests_rejected_across_all_endpoints(self, lifecycle_client):
         """All lifecycle endpoints reject requests without auth."""

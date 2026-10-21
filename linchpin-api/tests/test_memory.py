@@ -110,7 +110,7 @@ def test_create_memory_store_409_on_name_conflict(mock_fetch, client):
         headers=AUTH,
     )
     assert resp.status_code == 409
-    assert resp.json()["detail"]["error"] == "name_conflict"
+    assert resp.json()["error"] == "name_conflict"
 
 
 @pytest.mark.parametrize("bad_name", [
@@ -203,7 +203,7 @@ def test_delete_memory_store_409_when_mounted(mock_fetch, client):
     ]
     resp = client.delete(f"/v1/memory_stores/{sid}", headers=AUTH)
     assert resp.status_code == 409
-    assert resp.json()["detail"]["error"] == "memory_store_in_use"
+    assert resp.json()["error"] == "memory_store_in_use"
     assert resp.json()["detail"]["blocking_session_id"] == str(session_id)
 
 
@@ -272,7 +272,7 @@ def test_list_memory_rejects_bad_path_prefix(client):
             headers=AUTH,
         )
     assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "invalid_path_prefix"
+    assert resp.json()["error"] == "invalid_path_prefix"
 
 
 # ---------------------------------------------------------------------------
@@ -408,7 +408,7 @@ def test_get_version_content_404_when_redacted(mock_fetch, client):
         headers=AUTH,
     )
     assert resp.status_code == 404
-    assert resp.json()["detail"]["error"] == "redacted"
+    assert resp.json()["error"] == "redacted"
 
 
 @patch("app.routes.memory_versions.fetch_one", new_callable=AsyncMock)

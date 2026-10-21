@@ -13,8 +13,10 @@ from __future__ import annotations
 import json
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.audit import record_audit
+from app.auth import AuthContext, require_auth
 from app.db import execute, fetch_all, fetch_one
 from app.models import (
     CreateWebhookEndpointRequest,
@@ -81,6 +83,7 @@ def _parse_endpoint_uuid(endpoint_id: str) -> uuid.UUID:
 @router.post("", status_code=201, response_model=WebhookEndpoint)
 async def create_webhook_endpoint(
     body: CreateWebhookEndpointRequest,
+    ctx: AuthContext = Depends(require_auth),
 ) -> WebhookEndpoint:
     """Create a new webhook endpoint. The HMAC secret is returned ONCE in
     this response — subsequent reads omit it. Use ``PATCH ... rotate_secret``
@@ -92,11 +95,12 @@ async def create_webhook_endpoint(
     row = await fetch_one(
         """
         INSERT INTO webhook_endpoints
-            (id, url, secret, enabled_events, description, enabled)
-        VALUES ($1, $2, $3, $4::jsonb, $5, true)
+            (id, project_id, url, secret, enabled_events, description, enabled)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, true)
         RETURNING *
         """,
         endpoint_id,
+        uuid.UUID(ctx.project_id),
         body.url,
         secret,
         enabled_events_json,
@@ -105,13 +109,24 @@ async def create_webhook_endpoint(
 
     # The create response is the *only* place the secret leaves the DB
     # in clear. Read-after-write paths strip it.
+    await record_audit(
+        "webhook.created", "webhook_endpoint", str(endpoint_id), ctx=ctx,
+        detail={"url": body.url},
+    )
     return _row_to_endpoint(row, include_secret=True)
 
 
 @router.get("/{endpoint_id}", response_model=WebhookEndpoint)
-async def get_webhook_endpoint(endpoint_id: str) -> WebhookEndpoint:
+async def get_webhook_endpoint(
+    endpoint_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> WebhookEndpoint:
     uid = _parse_endpoint_uuid(endpoint_id)
-    row = await fetch_one("SELECT * FROM webhook_endpoints WHERE id = $1", uid)
+    row = await fetch_one(
+        "SELECT * FROM webhook_endpoints WHERE id = $1 AND project_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
+    )
     if row is None:
         raise HTTPException(
             status_code=404,
@@ -125,11 +140,15 @@ async def get_webhook_endpoint(endpoint_id: str) -> WebhookEndpoint:
 
 @router.patch("/{endpoint_id}", response_model=WebhookEndpoint)
 async def update_webhook_endpoint(
-    endpoint_id: str, body: UpdateWebhookEndpointRequest
+    endpoint_id: str,
+    body: UpdateWebhookEndpointRequest,
+    ctx: AuthContext = Depends(require_auth),
 ) -> WebhookEndpoint:
     uid = _parse_endpoint_uuid(endpoint_id)
     existing = await fetch_one(
-        "SELECT * FROM webhook_endpoints WHERE id = $1", uid
+        "SELECT * FROM webhook_endpoints WHERE id = $1 AND project_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
     )
     if existing is None:
         raise HTTPException(
@@ -171,21 +190,32 @@ async def update_webhook_endpoint(
 
     sql = (
         f"UPDATE webhook_endpoints SET {', '.join(set_clauses)} "
-        f"WHERE id = ${len(values) + 1} RETURNING *"
+        f"WHERE id = ${len(values) + 1} AND project_id = ${len(values) + 2}"
+        " RETURNING *"
     )
     values.append(uid)
+    values.append(uuid.UUID(ctx.project_id))
     row = await fetch_one(sql, *values)
+    await record_audit(
+        "webhook.updated", "webhook_endpoint", endpoint_id, ctx=ctx,
+        detail={"fields": sorted(updates.keys()), "secret_rotated": new_secret is not None},
+    )
     return _row_to_endpoint(row, include_secret=new_secret is not None)
 
 
 @router.delete("/{endpoint_id}", status_code=204)
-async def delete_webhook_endpoint(endpoint_id: str) -> None:
+async def delete_webhook_endpoint(
+    endpoint_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> None:
     """Soft-delete (sets ``archived_at``). The endpoint stops receiving
     new deliveries but historical ``webhook_deliveries`` rows are
     preserved for audit. Idempotent."""
     uid = _parse_endpoint_uuid(endpoint_id)
     existing = await fetch_one(
-        "SELECT id FROM webhook_endpoints WHERE id = $1", uid
+        "SELECT id FROM webhook_endpoints WHERE id = $1 AND project_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
     )
     if existing is None:
         raise HTTPException(
@@ -197,19 +227,25 @@ async def delete_webhook_endpoint(endpoint_id: str) -> None:
         )
     await execute(
         "UPDATE webhook_endpoints SET archived_at = NOW(), enabled = false "
-        "WHERE id = $1 AND archived_at IS NULL",
+        "WHERE id = $1 AND archived_at IS NULL AND project_id = $2",
         uid,
+        uuid.UUID(ctx.project_id),
     )
+    await record_audit("webhook.deleted", "webhook_endpoint", endpoint_id, ctx=ctx)
 
 
 @router.get("", response_model=PaginatedListResponse)
 async def list_webhook_endpoints(
     limit: int = Query(20, ge=1, le=100),
     include_archived: bool = Query(False),
+    ctx: AuthContext = Depends(require_auth),
 ) -> PaginatedListResponse:
-    where = "" if include_archived else "WHERE archived_at IS NULL"
+    where = "WHERE project_id = $1"
+    if not include_archived:
+        where += " AND archived_at IS NULL"
     rows = await fetch_all(
-        f"SELECT * FROM webhook_endpoints {where} ORDER BY created_at DESC LIMIT $1",
+        f"SELECT * FROM webhook_endpoints {where} ORDER BY created_at DESC LIMIT $2",
+        uuid.UUID(ctx.project_id),
         limit,
     )
     return PaginatedListResponse(
@@ -222,8 +258,24 @@ async def list_webhook_endpoints(
 async def list_webhook_deliveries(
     endpoint_id: str,
     limit: int = Query(50, ge=1, le=200),
+    ctx: AuthContext = Depends(require_auth),
 ) -> PaginatedListResponse:
     uid = _parse_endpoint_uuid(endpoint_id)
+    # Tenant boundary: the endpoint must belong to the caller's project.
+    # Deliveries inherit ownership from their endpoint.
+    endpoint_row = await fetch_one(
+        "SELECT id FROM webhook_endpoints WHERE id = $1 AND project_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
+    )
+    if endpoint_row is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "not_found",
+                "message": f"Webhook endpoint {endpoint_id} not found",
+            },
+        )
     rows = await fetch_all(
         """
         SELECT * FROM webhook_deliveries

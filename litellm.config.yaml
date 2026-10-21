@@ -1,0 +1,17 @@
+# Atlas B11 — LiteLLM gateway config for Linchpin.
+#
+# Wildcard routing: every model id an agent requests is forwarded verbatim to
+# the OpenRouter upstream, so no per-model entries are needed here. Add
+# explicit `model_list` entries to reach self-hosted or custom OpenAI-
+# compatible endpoints — see docs/model-gateway.md.
+
+model_list:
+  - model_name: "*"
+    litellm_params:
+      model: "openrouter/*"
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

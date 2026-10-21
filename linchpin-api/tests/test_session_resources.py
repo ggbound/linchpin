@@ -95,12 +95,14 @@ def _make_file_row(
     source: str = "upload",
     archived_at=None,
     storage_path: str = "aa/bb/abcd1234",
+    filename: str = "foo.csv",
 ):
     return {
         "id": uuid.UUID(file_id) if file_id else uuid.uuid4(),
         "source": source,
         "archived_at": archived_at,
         "storage_path": storage_path,
+        "filename": filename,
     }
 
 
@@ -157,6 +159,10 @@ def sandbox_client(tmp_path):
         patch("app.routes.sessions.get_file_store", return_value=fake_store),
         patch("app.routes.sessions.os.path.isfile", return_value=True),
         patch("app.routes.sessions.append_event", new_callable=AsyncMock),
+        # Atlas A2 — create success path binds container_id + transitions
+        # to running before the response is built.
+        patch("app.routes.sessions.execute", new_callable=AsyncMock),
+        patch("app.routes.sessions.transition", new_callable=AsyncMock),
         patch("app.routes.sessions.ensure_session_outputs_dir", side_effect=_fake_ensure),
         patch("app.routes.sessions.watch_session_deliverables", new_callable=AsyncMock),
         patch("app.routes.sessions.watch_memory_store", new_callable=AsyncMock),
@@ -357,8 +363,9 @@ def test_create_session_with_file_resource_persists(mock_fetch_one, mock_fetch_a
     #   1. agent lookup
     #   2. env lookup
     #   3. file lookup (per resource)
-    #   4. INSERT sessions RETURNING *
+    #   4. INSERT sessions RETURNING * ('provisioning' row, pre-create)
     #   5. INSERT session_resources RETURNING * (per resource)
+    #   6. post-transition row refresh (Atlas A2)
     mock_fetch_one.side_effect = [
         _make_agent_row(agent_id=agent_id),
         _make_env_row(env_id=env_id),
@@ -369,6 +376,8 @@ def test_create_session_with_file_resource_persists(mock_fetch_one, mock_fetch_a
             mount_path="/mnt/data/report.pdf",
             config={"file_id": file_id},
         ),
+        # Atlas A2 — post-transition row refresh ends the create path.
+        _make_session_row(session_id=session_id, agent_id=agent_id, environment_id=env_id),
     ]
     mock_fetch_all.return_value = []
 
@@ -418,7 +427,7 @@ def test_create_session_file_not_found_returns_422(mock_fetch_one, mock_fetch_al
     }
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
     assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "validation_error"
+    assert resp.json()["error"] == "validation_error"
 
 
 @patch("app.routes.sessions.fetch_all", new_callable=AsyncMock)
@@ -445,7 +454,7 @@ def test_create_session_archived_file_returns_422(mock_fetch_one, mock_fetch_all
     }
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
     assert resp.status_code == 422
-    assert "archived" in resp.json()["detail"]["message"]
+    assert "archived" in resp.json()["message"]
 
 
 @patch("app.routes.sessions.fetch_all", new_callable=AsyncMock)
@@ -473,7 +482,7 @@ def test_create_session_deliverable_source_rejected(mock_fetch_one, mock_fetch_a
     }
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
     assert resp.status_code == 422
-    assert "uploads" in resp.json()["detail"]["message"]
+    assert "uploads" in resp.json()["message"]
 
 
 @patch("app.routes.sessions.fetch_all", new_callable=AsyncMock)
@@ -541,6 +550,8 @@ def test_memory_store_resource_persists_and_materializes(
                 "instructions": "Read user preferences before responding.",
             },
         ) | {"type": "memory_store"},
+        # Atlas A2 — post-transition row refresh ends the create path.
+        _make_session_row(session_id=session_id, agent_id=agent_id, environment_id=env_id),
     ]
     mock_fetch_all.return_value = []
 
@@ -601,8 +612,8 @@ def test_memory_store_resource_not_found_returns_422(
     }
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
     assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "validation_error"
-    assert "not found" in resp.json()["detail"]["message"]
+    assert resp.json()["error"] == "validation_error"
+    assert "not found" in resp.json()["message"]
     mock_materialize.assert_not_awaited()
 
 
@@ -633,7 +644,7 @@ def test_memory_store_archived_returns_422(
     }
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
     assert resp.status_code == 422
-    assert "archived" in resp.json()["detail"]["message"]
+    assert "archived" in resp.json()["message"]
     mock_materialize.assert_not_awaited()
 
 
@@ -666,7 +677,7 @@ def test_memory_store_duplicate_id_in_request_returns_422(
     }
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
     assert resp.status_code == 422
-    assert "more than once" in resp.json()["detail"]["message"]
+    assert "more than once" in resp.json()["message"]
     mock_materialize.assert_not_awaited()
 
 
@@ -700,7 +711,7 @@ def test_memory_store_cap_exceeded_returns_422(
     }
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
     assert resp.status_code == 422
-    assert "cap is 2" in resp.json()["detail"]["message"]
+    assert "cap is 2" in resp.json()["message"]
     mock_materialize.assert_not_awaited()
 
 
@@ -734,6 +745,8 @@ def test_memory_store_read_only_mounts_ro_no_watcher(
             mount_path="/mnt/memory/preferences",
             config={"memory_store_id": store_id, "access": "read_only"},
         ) | {"type": "memory_store"},
+        # Atlas A2 — post-transition row refresh ends the create path.
+        _make_session_row(session_id=session_id, agent_id=agent_id, environment_id=env_id),
     ]
     mock_fetch_all.return_value = []
 
@@ -783,6 +796,8 @@ def test_memory_store_read_write_mounts_rw_and_spawns_watcher(
             mount_path="/mnt/memory/notes",
             config={"memory_store_id": store_id, "access": "read_write"},
         ) | {"type": "memory_store"},
+        # Atlas A2 — post-transition row refresh ends the create path.
+        _make_session_row(session_id=session_id, agent_id=agent_id, environment_id=env_id),
     ]
     mock_fetch_all.return_value = []
 
@@ -848,6 +863,8 @@ def test_terminate_session_cancels_memory_watchers(
             mount_path="/mnt/memory/notes",
             config={"memory_store_id": store_id, "access": "read_write"},
         ) | {"type": "memory_store"},
+        # Atlas A2 — create path ends with a post-transition row refresh.
+        _make_session_row(session_id=session_id, agent_id=agent_id, environment_id=env_id),
         # terminate_session
         _make_session_row(session_id=session_id, agent_id=agent_id, environment_id=env_id),
         _make_session_row(session_id=session_id, agent_id=agent_id, environment_id=env_id),
@@ -921,6 +938,8 @@ def test_git_repository_resource_clones_and_mounts(
                 "has_token": True,
             },
         ) | {"type": "git_repository"},
+        # Atlas A2 — post-transition row refresh ends the create path.
+        _make_session_row(session_id=sid, agent_id=agent_id, environment_id=env_id),
     ]
     mock_fetch_all.return_value = []
 
@@ -984,6 +1003,8 @@ def test_github_repository_alias_still_accepted(
             session_id=sid, mount_path="/mnt/repo",
             config={"url": "https://github.com/x/y", "branch": None, "shallow": True, "has_token": False},
         ) | {"type": "git_repository"},
+        # Atlas A2 — post-transition row refresh ends the create path.
+        _make_session_row(session_id=sid, agent_id=agent_id, environment_id=env_id),
     ]
     mock_fetch_all.return_value = []
 
@@ -1039,7 +1060,7 @@ def test_git_repository_clone_failure_returns_500(
     }
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
     assert resp.status_code == 500
-    assert resp.json()["detail"]["error"] == "git_clone_failed"
+    assert resp.json()["error"] == "git_clone_failed"
 
 
 # ---------------------------------------------------------------------------
@@ -1085,6 +1106,8 @@ def test_create_session_without_resources_returns_empty_list(
         _make_agent_row(agent_id=agent_id),
         _make_env_row(env_id=env_id),
         _make_session_row(session_id=session_id, agent_id=agent_id, environment_id=env_id),
+        # Atlas A2 — post-transition row refresh ends the create path.
+        _make_session_row(session_id=session_id, agent_id=agent_id, environment_id=env_id),
     ]
     mock_fetch_all.return_value = []
 
@@ -1123,6 +1146,8 @@ def test_create_session_with_multiple_file_resources(mock_fetch_one, mock_fetch_
         _make_session_row(session_id=sid, agent_id=agent_id, environment_id=env_id),
         _make_resource_row(session_id=sid, mount_path="/mnt/data/a", config={"file_id": file_a}),
         _make_resource_row(session_id=sid, mount_path="/mnt/data/b", config={"file_id": file_b}),
+        # Atlas A2 — post-transition row refresh ends the create path.
+        _make_session_row(session_id=sid, agent_id=agent_id, environment_id=env_id),
     ]
     mock_fetch_all.return_value = []
 
@@ -1218,7 +1243,9 @@ def test_terminate_session_hydrates_resources(mock_fetch_one, mock_fetch_all, sa
     existing = _make_session_row(session_id=sid)
     terminated = {**existing, "status": "terminated"}
     mock_fetch_one.side_effect = [existing, terminated]
-    mock_fetch_all.return_value = [_make_resource_row(session_id=sid, mount_path="/mnt/x")]
+    # Atlas B12 — terminate now runs a second fetch_all (session-scoped
+    # files purge) before _load_session_resources; first call must see none.
+    mock_fetch_all.side_effect = [[], [_make_resource_row(session_id=sid, mount_path="/mnt/x")]]
 
     # PR3 — terminate also UPDATEs session_resources state via execute(); patch it.
     with patch("app.routes.sessions.execute", new_callable=AsyncMock):
@@ -1271,6 +1298,8 @@ def test_create_session_passes_mounts_to_sandbox(
         _make_resource_row(
             session_id=sid, mount_path="/mnt/data/report.pdf", config={"file_id": file_id},
         ),
+        # Atlas A2 — post-transition row refresh ends the create path.
+        _make_session_row(session_id=sid, agent_id=agent_id, environment_id=env_id),
     ]
     mock_fetch_all.return_value = []
 
@@ -1330,6 +1359,8 @@ def test_create_session_marks_resource_failed_when_host_path_missing(
             config={"file_id": file_id},
             state="failed",
         ),
+        # Atlas A2 — post-transition row refresh ends the create path.
+        _make_session_row(session_id=sid, agent_id=agent_id, environment_id=env_id),
     ]
     mock_fetch_all.return_value = []
 
@@ -1388,10 +1419,13 @@ def test_create_session_returns_500_when_sandbox_create_fails(
     env_id = str(uuid.uuid4())
     file_id = str(uuid.uuid4())
 
+    # Atlas A2 — the 'provisioning' row INSERTs before ensure_image/create,
+    # so the mocked INSERT must succeed before sandbox.create raises.
     mock_fetch_one.side_effect = [
         _make_agent_row(agent_id=agent_id),
         _make_env_row(env_id=env_id),
         _make_file_row(file_id=file_id),
+        _make_session_row(agent_id=agent_id, environment_id=env_id),
     ]
     mock_fetch_all.return_value = []
     mock_sandbox.create.side_effect = SandboxError("docker daemon unavailable")
@@ -1405,7 +1439,7 @@ def test_create_session_returns_500_when_sandbox_create_fails(
     }
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
     assert resp.status_code == 500
-    assert resp.json()["detail"]["error"] == "sandbox_create_failed"
+    assert resp.json()["error"] == "sandbox_create_failed"
 
 
 # ---------------------------------------------------------------------------
@@ -1479,9 +1513,10 @@ def test_post_session_resource_returns_501(sandbox_client):
         headers=AUTH,
     )
     assert resp.status_code == 501
-    detail = resp.json()["detail"]
-    assert detail["error"] == "not_implemented"
-    assert detail["available_in"] == "v0.2.x"
+    # Atlas A5 — error envelope: error/message at top level, extras under detail.
+    body = resp.json()
+    assert body["error"] == "not_implemented"
+    assert body["detail"]["available_in"] == "v0.2.x"
 
 
 def test_post_session_resource_422_for_invalid_body(sandbox_client):
@@ -1506,7 +1541,7 @@ def test_delete_session_resource_returns_501(sandbox_client):
         f"/v1/sessions/{sid}/resources/{rid}", headers=AUTH,
     )
     assert resp.status_code == 501
-    assert resp.json()["detail"]["error"] == "not_implemented"
+    assert resp.json()["error"] == "not_implemented"
 
 
 # ---------------------------------------------------------------------------
@@ -1554,8 +1589,8 @@ def test_create_session_422_when_two_resources_share_storage_path(
     resp = client.post("/v1/sessions", json=payload, headers=AUTH)
 
     assert resp.status_code == 422, resp.text
-    detail = resp.json()["detail"]
-    assert detail["error"] == "duplicate_mount_source"
+    body = resp.json()
+    assert body["error"] == "duplicate_mount_source"
     # sandbox.create must NOT have been called — collision detected pre-create.
     mock_sandbox.create.assert_not_called()
 
@@ -1584,6 +1619,8 @@ def test_create_session_persists_canonical_uuid_in_config(
         _make_file_row(file_id=canonical, storage_path="aa/bb/canon"),
         _make_session_row(session_id=sid, agent_id=agent_id, environment_id=env_id),
         _make_resource_row(session_id=sid, mount_path="/mnt/d", config={"file_id": canonical}),
+        # Atlas A2 — post-transition row refresh ends the create path.
+        _make_session_row(session_id=sid, agent_id=agent_id, environment_id=env_id),
     ]
     mock_fetch_all.return_value = []
 
@@ -1634,6 +1671,8 @@ def test_create_session_marks_failed_resource_with_unmounted_at(
             config={"file_id": file_id},
             state="failed",
         ),
+        # Atlas A2 — post-transition row refresh ends the create path.
+        _make_session_row(session_id=sid, agent_id=agent_id, environment_id=env_id),
     ]
     mock_fetch_all.return_value = []
 
@@ -1675,8 +1714,10 @@ def test_create_session_destroys_container_on_db_failure(
     env_id = str(uuid.uuid4())
     file_id = str(uuid.uuid4())
 
-    # Validation succeeds; then INSERT INTO sessions raises (e.g. transient
-    # connection failure or a constraint we forgot about).
+    # Atlas A2 — the 'provisioning' sessions row INSERTs before
+    # ensure_image/create, so the simulated DB failure now lands on the
+    # session_resources INSERT, which still runs after sandbox.create
+    # succeeds (the cleanup contract under test is unchanged).
     class FakeDBError(Exception):
         pass
 
@@ -1684,7 +1725,8 @@ def test_create_session_destroys_container_on_db_failure(
         _make_agent_row(agent_id=agent_id),
         _make_env_row(env_id=env_id),
         _make_file_row(file_id=file_id),
-        FakeDBError("connection reset during sessions INSERT"),
+        _make_session_row(agent_id=agent_id, environment_id=env_id),
+        FakeDBError("connection reset during session_resources INSERT"),
     ]
     mock_fetch_all.return_value = []
 
@@ -1707,3 +1749,104 @@ def test_create_session_destroys_container_on_db_failure(
     assert resp.status_code == 500
     mock_sandbox.create.assert_called_once()
     mock_sandbox.destroy.assert_called_once_with("container-abc")
+
+
+@patch("app.routes.sessions.append_event", new_callable=AsyncMock)
+@patch("app.routes.sessions.fetch_all", new_callable=AsyncMock)
+@patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
+def test_create_session_defaults_upload_mount_path(
+    mock_fetch_one, mock_fetch_all, _mock_append, sandbox_client
+):
+    """Atlas B5 — a file resource without mount_path defaults to
+    /mnt/session/uploads/<basename>, both in the sandbox mounts and in
+    the persisted session_resources row."""
+    from app.sandbox import ResourceMount
+
+    client, mock_sandbox = sandbox_client
+    agent_id = str(uuid.uuid4())
+    env_id = str(uuid.uuid4())
+    file_id = str(uuid.uuid4())
+    sid = str(uuid.uuid4())
+    expected_path = "/mnt/session/uploads/foo.csv"
+
+    mock_fetch_one.side_effect = [
+        _make_agent_row(agent_id=agent_id),
+        _make_env_row(env_id=env_id),
+        _make_file_row(file_id=file_id, filename="foo.csv"),
+        _make_session_row(session_id=sid, agent_id=agent_id, environment_id=env_id),
+        _make_resource_row(
+            session_id=sid, mount_path=expected_path, config={"file_id": file_id},
+        ),
+        # Atlas A2 — post-transition row refresh ends the create path.
+        _make_session_row(session_id=sid, agent_id=agent_id, environment_id=env_id),
+    ]
+    mock_fetch_all.return_value = []
+
+    payload = {
+        "agent_id": agent_id,
+        "environment_id": env_id,
+        "resources": [
+            {"type": "file", "file_id": file_id},
+        ],
+    }
+    resp = client.post("/v1/sessions", json=payload, headers=AUTH)
+
+    assert resp.status_code == 201, resp.text
+    call = mock_sandbox.create.call_args
+    mounts = call.kwargs.get("mounts")
+    assert mounts is not None
+    upload_mounts = [m for m in mounts if m.container_path == expected_path]
+    assert upload_mounts == [ResourceMount(
+        host_path="/var/lib/linchpin/files/aa/bb/abcd1234",
+        container_path=expected_path,
+        mode="ro",
+    )]
+
+    # The persisted session_resources row carries the same default path.
+    # (INSERT args: $1=session_id, $2=type, $3=mount_path, ...)
+    inserts = [
+        c for c in mock_fetch_one.await_args_list
+        if "INSERT INTO session_resources" in c.args[0]
+    ]
+    assert len(inserts) == 1
+    assert inserts[0].args[3] == expected_path
+
+
+@patch("app.routes.sessions.fetch_all", new_callable=AsyncMock)
+@patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
+def test_create_session_422_when_default_upload_mounts_collide(
+    mock_fetch_one, mock_fetch_all, sandbox_client
+):
+    """Atlas B5 — two file resources without mount_path whose basenames
+    collide on the same default path must 422 instead of silently
+    mounting the last one over the first."""
+    client, mock_sandbox = sandbox_client
+    agent_id = str(uuid.uuid4())
+    env_id = str(uuid.uuid4())
+    file_id_1 = str(uuid.uuid4())
+    file_id_2 = str(uuid.uuid4())
+
+    mock_fetch_one.side_effect = [
+        _make_agent_row(agent_id=agent_id),
+        _make_env_row(env_id=env_id),
+        _make_file_row(file_id=file_id_1, filename="foo.csv", storage_path="aa/bb/one"),
+        _make_file_row(file_id=file_id_2, filename="foo.csv", storage_path="aa/bb/two"),
+    ]
+    mock_fetch_all.return_value = []
+
+    payload = {
+        "agent_id": agent_id,
+        "environment_id": env_id,
+        "resources": [
+            {"type": "file", "file_id": file_id_1},
+            {"type": "file", "file_id": file_id_2},
+        ],
+    }
+    resp = client.post("/v1/sessions", json=payload, headers=AUTH)
+
+    assert resp.status_code == 422, resp.text
+    # Atlas A5 error envelope lifts detail={"error", "message"} to the top level.
+    body = resp.json()
+    assert body["error"] == "validation_error"
+    assert "default-mount" in body["message"]
+    mock_sandbox.create.assert_not_called()

@@ -13,8 +13,10 @@ from __future__ import annotations
 import os
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.audit import record_audit
+from app.auth import AuthContext, require_auth
 from app.db import execute, fetch_all, fetch_one
 from app.models import (
     CreateMemoryStoreRequest,
@@ -25,19 +27,6 @@ from app.models import (
 
 
 router = APIRouter(prefix="/memory_stores", tags=["memory"])
-
-
-def _workspace_id() -> uuid.UUID:
-    """Single-tenant for v0.3 — every store carries this constant
-    workspace_id until multi-tenancy lands post-v1.0."""
-    raw = os.environ.get(
-        "LINCHPIN_DEFAULT_WORKSPACE_ID",
-        "00000000-0000-0000-0000-000000000001",
-    )
-    try:
-        return uuid.UUID(raw)
-    except ValueError:
-        return uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 def _row_to_store(row) -> MemoryStore:
@@ -65,11 +54,14 @@ def _parse_store_uuid(store_id: str) -> uuid.UUID:
 
 
 @router.post("", status_code=201, response_model=MemoryStore)
-async def create_memory_store(body: CreateMemoryStoreRequest) -> MemoryStore:
+async def create_memory_store(
+    body: CreateMemoryStoreRequest,
+    ctx: AuthContext = Depends(require_auth),
+) -> MemoryStore:
     """Create a memory store. ``name`` must be unique (live) within the
     workspace — soft-deleted stores don't count toward uniqueness."""
     store_id = uuid.uuid4()
-    workspace_id = _workspace_id()
+    workspace_id = uuid.UUID(ctx.project_id)
 
     # Uniqueness check (partial index would also catch this, but a clean
     # 409 is friendlier than a 500 with a UniqueViolation).
@@ -101,13 +93,24 @@ async def create_memory_store(body: CreateMemoryStoreRequest) -> MemoryStore:
         body.description,
         workspace_id,
     )
+    await record_audit(
+        "memory_store.created", "memory_store", str(store_id), ctx=ctx,
+        detail={"name": body.name},
+    )
     return _row_to_store(row)
 
 
 @router.get("/{store_id}", response_model=MemoryStore)
-async def get_memory_store(store_id: str) -> MemoryStore:
+async def get_memory_store(
+    store_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> MemoryStore:
     uid = _parse_store_uuid(store_id)
-    row = await fetch_one("SELECT * FROM memory_stores WHERE id = $1", uid)
+    row = await fetch_one(
+        "SELECT * FROM memory_stores WHERE id = $1 AND workspace_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
+    )
     if row is None:
         raise HTTPException(
             status_code=404,
@@ -121,11 +124,15 @@ async def get_memory_store(store_id: str) -> MemoryStore:
 
 @router.patch("/{store_id}", response_model=MemoryStore)
 async def update_memory_store(
-    store_id: str, body: UpdateMemoryStoreRequest
+    store_id: str,
+    body: UpdateMemoryStoreRequest,
+    ctx: AuthContext = Depends(require_auth),
 ) -> MemoryStore:
     uid = _parse_store_uuid(store_id)
     existing = await fetch_one(
-        "SELECT * FROM memory_stores WHERE id = $1", uid
+        "SELECT * FROM memory_stores WHERE id = $1 AND workspace_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
     )
     if existing is None:
         raise HTTPException(
@@ -147,14 +154,23 @@ async def update_memory_store(
         body.description,
         uid,
     )
+    await record_audit(
+        "memory_store.updated", "memory_store", store_id, ctx=ctx,
+        detail={"fields": ["description"]},
+    )
     return _row_to_store(row)
 
 
 @router.post("/{store_id}/archive", response_model=MemoryStore)
-async def archive_memory_store(store_id: str) -> MemoryStore:
+async def archive_memory_store(
+    store_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> MemoryStore:
     uid = _parse_store_uuid(store_id)
     existing = await fetch_one(
-        "SELECT * FROM memory_stores WHERE id = $1", uid
+        "SELECT * FROM memory_stores WHERE id = $1 AND workspace_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
     )
     if existing is None:
         raise HTTPException(
@@ -169,21 +185,28 @@ async def archive_memory_store(store_id: str) -> MemoryStore:
     row = await fetch_one(
         """
         UPDATE memory_stores SET archived_at = NOW(), updated_at = NOW()
-        WHERE id = $1 RETURNING *
+        WHERE id = $1 AND workspace_id = $2 RETURNING *
         """,
         uid,
+        uuid.UUID(ctx.project_id),
     )
+    await record_audit("memory_store.archived", "memory_store", store_id, ctx=ctx)
     return _row_to_store(row)
 
 
 @router.delete("/{store_id}", status_code=204)
-async def delete_memory_store(store_id: str) -> None:
+async def delete_memory_store(
+    store_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> None:
     """Hard delete: cascades to memories + versions. Refuses (409) if any
     active session references this store via ``session_resources``.
     """
     uid = _parse_store_uuid(store_id)
     existing = await fetch_one(
-        "SELECT id FROM memory_stores WHERE id = $1", uid
+        "SELECT id FROM memory_stores WHERE id = $1 AND workspace_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
     )
     if existing is None:
         raise HTTPException(
@@ -218,20 +241,26 @@ async def delete_memory_store(store_id: str) -> None:
             },
         )
 
-    await execute("DELETE FROM memory_stores WHERE id = $1", uid)
+    await execute(
+        "DELETE FROM memory_stores WHERE id = $1 AND workspace_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
+    )
+    await record_audit("memory_store.deleted", "memory_store", store_id, ctx=ctx)
 
 
 @router.get("", response_model=PaginatedListResponse)
 async def list_memory_stores(
     limit: int = Query(20, ge=1, le=100),
     include_archived: bool = Query(False),
+    ctx: AuthContext = Depends(require_auth),
 ) -> PaginatedListResponse:
     where = "WHERE workspace_id = $1"
     if not include_archived:
         where += " AND archived_at IS NULL"
     rows = await fetch_all(
         f"SELECT * FROM memory_stores {where} ORDER BY created_at DESC LIMIT $2",
-        _workspace_id(),
+        uuid.UUID(ctx.project_id),
         limit,
     )
     return PaginatedListResponse(

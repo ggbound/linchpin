@@ -647,7 +647,14 @@ class OllamaProvider:
 
 
 def get_provider(config: ModelConfig) -> ModelProviderProtocol:
-    """Return the appropriate provider adapter for *config*."""
+    """Return the appropriate provider adapter for *config*.
+
+    Atlas B11 — ``openrouter`` doubles as the generic OpenAI-compatible
+    channel: setting ``config.base_url`` redirects it to any OpenAI-style
+    upstream (e.g. a LiteLLM gateway or a self-hosted vLLM server) without a
+    new adapter. Credential naming follows the provider string, not the
+    endpoint (see docs/model-gateway.md).
+    """
     if config.provider == "openrouter":
         return OpenRouterProvider(base_url=config.base_url or OPENROUTER_DEFAULT_BASE_URL)
     if config.provider == "ollama":

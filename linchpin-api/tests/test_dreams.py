@@ -172,7 +172,7 @@ def test_start_dream_input_store_missing_returns_422(mock_fetch_one, app_client,
         headers=AUTH,
     )
     assert resp.status_code == 422
-    assert "input memory store" in resp.json()["detail"]["message"]
+    assert "input memory store" in resp.json()["message"]
 
 
 @patch("app.routes.dreams.fetch_one", new_callable=AsyncMock)
@@ -188,7 +188,7 @@ def test_start_dream_input_store_archived_returns_422(mock_fetch_one, app_client
         headers=AUTH,
     )
     assert resp.status_code == 422
-    assert "archived" in resp.json()["detail"]["message"]
+    assert "archived" in resp.json()["message"]
 
 
 @patch("app.routes.dreams.fetch_one", new_callable=AsyncMock)
@@ -204,7 +204,7 @@ def test_start_dream_no_dreamer_configured_returns_422(mock_fetch_one, app_clien
         headers=AUTH,
     )
     assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "dreamer_not_configured"
+    assert resp.json()["error"] == "dreamer_not_configured"
 
 
 @patch("app.routes.dreams.fetch_one", new_callable=AsyncMock)
@@ -247,7 +247,7 @@ def test_start_dream_dreamer_missing_returns_422(mock_fetch_one, app_client, mon
         headers=AUTH,
     )
     assert resp.status_code == 422
-    assert "dreamer agent" in resp.json()["detail"]["message"]
+    assert "dreamer agent" in resp.json()["message"]
 
 
 @patch("app.routes.dreams.fetch_one", new_callable=AsyncMock)
@@ -267,7 +267,7 @@ def test_start_dream_dreamer_archived_returns_422(mock_fetch_one, app_client, mo
         headers=AUTH,
     )
     assert resp.status_code == 422
-    assert "archived" in resp.json()["detail"]["message"]
+    assert "archived" in resp.json()["message"]
 
 
 @patch("app.routes.dreams.fetch_one", new_callable=AsyncMock)
@@ -288,7 +288,7 @@ def test_start_dream_output_name_collision_returns_409(mock_fetch_one, app_clien
         headers=AUTH,
     )
     assert resp.status_code == 409
-    assert resp.json()["detail"]["error"] == "output_store_name_taken"
+    assert resp.json()["error"] == "output_store_name_taken"
 
 
 @patch("app.routes.dreams.fetch_one", new_callable=AsyncMock)

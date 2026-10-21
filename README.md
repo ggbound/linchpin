@@ -115,6 +115,8 @@ Versioned configs: model, system prompt, tools, MCP servers, per-tool permission
 
 OpenRouter model ids use the upstream-provider prefix (`anthropic/claude-sonnet-4`, `openai/gpt-4o`, `google/gemini-2.5-pro`, `meta-llama/llama-3.1-405b`, …). For Ollama, pass the local model tag (`llama3`, `qwen2.5-coder`, …) and set `base_url` to your Ollama endpoint.
 
+Need a self-hosted or custom OpenAI-compatible model (vLLM, your own fine-tune, per-agent budgets)? Route agents through the optional bundled LiteLLM gateway — see [docs/model-gateway.md](docs/model-gateway.md).
+
 ### Built-in tools
 
 `bash` · `read` · `write` · `edit` · `glob` · `grep` · `web_fetch` · `web_search`
@@ -151,10 +153,16 @@ A React UI for browsing agents/environments/sessions and chatting with agents li
 
 ## API reference
 
-All endpoints are under `/v1` and require bearer auth.
+All endpoints are under `/v1` and require bearer auth. Errors use a
+unified envelope — see [docs/error-codes.md](docs/error-codes.md). Rate
+limits and project quotas are opt-in — see [docs/limits.md](docs/limits.md).
 
 | Method | Path | Purpose |
 |---|---|---|
+| `GET` | `/v1/projects` | List projects |
+| `PATCH` | `/v1/projects/{id}` | Set/clear project quotas (bootstrap key only) |
+| `POST` `GET` | `/v1/api-keys` | Issue / list API keys (optionally rate-limited) |
+| `DELETE` | `/v1/api-keys/{id}` | Revoke an API key |
 | `POST` `GET` | `/v1/agents` | Create / list agents |
 | `GET` | `/v1/agents/{id}` | Fetch agent |
 | `POST` `GET` | `/v1/environments` | Create / list environments |

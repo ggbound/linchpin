@@ -64,7 +64,10 @@ def _make_session_row(status="idle"):
     return {
         "id": uuid.UUID(_SESSION_ID),
         "agent_id": uuid.UUID(_AGENT_ID),
-        "agent_version": 1,
+        # Atlas A1 — None means "no version pin" so load_agent_at_version
+        # falls straight through to the mocked load_agent() without
+        # querying the (unmocked) agent_versions snapshot table.
+        "agent_version": None,
         "environment_id": uuid.UUID(_ENV_ID),
         "status": status,
         "container_id": _CONTAINER_ID,
@@ -348,7 +351,7 @@ class TestRunSessionTextResponse:
 
         transitions = []
 
-        async def mock_transition(sid, status):
+        async def mock_transition(sid, status, stop_reason=None):
             transitions.append(status)
 
         # After first iteration, set session to terminated so loop exits
@@ -947,7 +950,7 @@ class TestRunSessionProviderError:
 
         transitions = []
 
-        async def mock_transition(sid, status):
+        async def mock_transition(sid, status, stop_reason=None):
             transitions.append(status)
 
         call_count = 0
@@ -1534,7 +1537,7 @@ class TestHandleInterrupt:
         transitions = []
         appended = []
 
-        async def mock_transition(sid, status):
+        async def mock_transition(sid, status, stop_reason=None):
             transitions.append(status)
 
         async def mock_append(sid, etype, payload):
@@ -1577,7 +1580,7 @@ class TestRunSessionInterrupt:
 
         transitions = []
 
-        async def mock_transition(sid, status):
+        async def mock_transition(sid, status, stop_reason=None):
             transitions.append(status)
 
         # check_for_interrupt returns True on first call, then session terminates
@@ -1863,7 +1866,7 @@ class TestCleanupExpiredSessions:
         transitions = []
         appended = []
 
-        async def mock_transition(sid, status):
+        async def mock_transition(sid, status, stop_reason=None):
             transitions.append((sid, status))
 
         async def mock_append(sid, etype, payload):
@@ -1975,7 +1978,7 @@ class TestCleanupExpiredSessions:
             {"id": uuid.UUID(session_id), "container_id": None},
         ]
 
-        async def mock_transition(sid, status):
+        async def mock_transition(sid, status, stop_reason=None):
             pass
 
         async def mock_append(sid, etype, payload):
@@ -2042,7 +2045,7 @@ class TestRecoverSessions:
             appended_events.append((sid, etype, payload))
             return MagicMock()
 
-        async def mock_transition(sid, status):
+        async def mock_transition(sid, status, stop_reason=None):
             transitions.append((sid, status))
 
         with (
@@ -2088,7 +2091,7 @@ class TestRecoverSessions:
             appended_events.append((sid, etype, payload))
             return MagicMock()
 
-        async def mock_transition(sid, status):
+        async def mock_transition(sid, status, stop_reason=None):
             transitions.append((sid, status))
 
         with (
@@ -2133,7 +2136,7 @@ class TestRecoverSessions:
             appended_events.append((sid, etype, payload))
             return MagicMock()
 
-        async def mock_transition(sid, status):
+        async def mock_transition(sid, status, stop_reason=None):
             transitions.append((sid, status))
 
         with (
@@ -2192,7 +2195,7 @@ class TestRecoverSessions:
         orchestrator_tasks: dict = {}
         transitions: list = []
 
-        async def mock_transition(sid, status):
+        async def mock_transition(sid, status, stop_reason=None):
             transitions.append((sid, status))
 
         async def mock_append(sid, etype, payload):
@@ -2238,7 +2241,7 @@ class TestRecoverSessions:
         async def fake_watcher(session_id: str) -> None:
             watcher_calls.append(session_id)
 
-        async def mock_transition(sid, status):
+        async def mock_transition(sid, status, stop_reason=None):
             pass
 
         async def mock_append(sid, etype, payload):
@@ -2319,3 +2322,520 @@ class TestUpdateUsage:
         sql = mock_fetch.await_args.args[0]
         assert "COALESCE((usage->>'cache_creation_input_tokens')::int, 0)" in sql
         assert "COALESCE((usage->>'cache_read_input_tokens')::int, 0)" in sql
+
+
+# ---------------------------------------------------------------------------
+# Atlas B2 — interrupt tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clear_interrupt_flags():
+    """Isolate the process-wide interrupt registry per test."""
+    from app import interrupts
+
+    interrupts._flags.clear()
+    yield
+    interrupts._flags.clear()
+
+
+class TestRunSessionStreamInterrupt:
+    """Interrupt mid-stream: the partial text is persisted as
+    agent.message, the poisoned chunk is dropped, and the turn closes
+    out with idle(end_turn) (Atlas B2)."""
+
+    @pytest.mark.asyncio
+    async def test_mid_stream_interrupt_keeps_partial_text(self):
+        from app import interrupts
+        from app.providers import StreamChunk
+
+        agent = _make_agent()
+        session_row = _make_session_row(status="idle")
+
+        async def fake_send_streaming(*_args, **_kwargs):
+            yield StreamChunk(type="text_delta", text="Partial")
+            # Interrupt lands between chunks — post_events sets this flag
+            # in production when it persists the user.interrupt event.
+            interrupts.request_interrupt(_SESSION_ID)
+            yield StreamChunk(type="text_delta", text=" never-persisted")
+            yield StreamChunk(type="final", stop_reason="end_turn", usage={})
+
+        mock_provider = MagicMock()
+        mock_provider.send_streaming = fake_send_streaming
+
+        appended_events = []
+
+        async def mock_append(sid, etype, payload):
+            appended_events.append((etype, payload))
+            return MagicMock(session_id=sid, cursor="c1", seq=1, type=etype, payload=payload, processed_at=None)
+
+        transitions = []
+
+        async def mock_transition(sid, status, stop_reason=None):
+            transitions.append((status, stop_reason))
+
+        # 2 live loads (loop top + wake). The 3rd load — next iteration's
+        # loop top — terminates so the loop exits after the close-out.
+        load_call_count = {"n": 0}
+
+        async def mock_load_session(sid):
+            load_call_count["n"] += 1
+            if load_call_count["n"] <= 2:
+                return session_row
+            return {**session_row, "status": "terminated"}
+
+        sandbox = MagicMock()
+
+        with (
+            patch("app.orchestrator.load_session", side_effect=mock_load_session),
+            patch("app.orchestrator.load_agent", new_callable=AsyncMock, return_value=agent),
+            patch("app.orchestrator.listen", side_effect=_listen_once()),
+            patch("app.orchestrator.append_event", side_effect=mock_append),
+            patch("app.orchestrator.transition", side_effect=mock_transition),
+            patch("app.orchestrator.update_usage", new_callable=AsyncMock),
+            patch("app.orchestrator.get_provider", return_value=mock_provider),
+            patch("app.orchestrator.build_tool_definitions", return_value=[]),
+            patch("app.orchestrator.check_for_interrupt", new_callable=AsyncMock, return_value=False),
+            patch("app.orchestrator.build_context", new_callable=AsyncMock, return_value=[
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hi"},
+            ]),
+        ):
+            await run_session(_SESSION_ID, sandbox)
+
+        # Partial text persisted; the post-interrupt delta never was.
+        messages = [p for etype, p in appended_events if etype == "agent.message"]
+        assert messages == [{"content": "Partial"}]
+
+        # Closed out with idle(end_turn) — not idle(interrupt) — per the
+        # B2 plan's close-out semantics for interrupted streams.
+        assert transitions[-1] == ("idle", "end_turn")
+        statuses = [p for etype, p in appended_events if etype == "session.status"]
+        assert statuses[-1] == {"status": "idle", "stop_reason": "end_turn"}
+        idle_events = [p for etype, p in appended_events if etype == "session.status_idle"]
+        assert idle_events[-1] == {"stop_reason": "end_turn"}
+
+        # The flag was consumed, not leaked into the next turn.
+        assert not interrupts.is_interrupted(_SESSION_ID)
+
+        # Loop exited (3rd load hit the terminated row).
+        assert load_call_count["n"] == 3
+
+
+class TestRunSessionToolInterruptRace:
+    """Interrupt while a builtin tool runs: the dispatch is raced against
+    the in-process interrupt event, the sandbox command is killed via the
+    tracked PID, the tool_use/tool_result pairing is kept intact, and the
+    turn closes out with idle(end_turn) (Atlas B2)."""
+
+    @pytest.mark.asyncio
+    async def test_interrupt_wins_race_and_kills_command(self):
+        from app import interrupts
+
+        agent = _make_agent(tools=[
+            BuiltinToolConfig(
+                type="builtin",
+                configs=[
+                    BuiltinToolItemConfig(name="bash", permission_policy="always_allow"),
+                ],
+            ),
+        ])
+        session_row = _make_session_row(status="idle")
+
+        tool_response = ModelResponse(
+            content=[
+                ContentBlock(
+                    type="tool_use",
+                    tool_use_id="tu1",
+                    tool_name="bash",
+                    tool_input={"command": "sleep 100"},
+                ),
+            ],
+            stop_reason="tool_use",
+            usage={"input_tokens": 10, "output_tokens": 5, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+        )
+
+        mock_provider = AsyncMock()
+        setup_mock_provider(mock_provider, response=tool_response)
+
+        appended_events = []
+
+        async def mock_append(sid, etype, payload):
+            appended_events.append((etype, payload))
+            return MagicMock(session_id=sid, cursor="c1", seq=1, type=etype, payload=payload, processed_at=None)
+
+        transitions = []
+
+        async def mock_transition(sid, status, stop_reason=None):
+            transitions.append((status, stop_reason))
+
+        # 3 live loads: loop top, wake, and the kill branch's container
+        # lookup. The 4th load (next loop top) terminates so the loop exits.
+        load_call_count = {"n": 0}
+
+        async def mock_load_session(sid):
+            load_call_count["n"] += 1
+            if load_call_count["n"] <= 3:
+                return session_row
+            return {**session_row, "status": "terminated"}
+
+        async def slow_dispatch(*_args, **_kwargs):
+            # Long-running command; the interrupt arrives mid-flight.
+            await asyncio.sleep(0.05)
+            interrupts.request_interrupt(_SESSION_ID)
+            return ('{"stdout": "killed-by-interrupt", "stderr": "", "exit_code": -1}', "agent.tool_result")
+
+        mock_dispatch = AsyncMock(side_effect=slow_dispatch)
+
+        sandbox = MagicMock()
+        sandbox.active_exec_pid = MagicMock(return_value=1234)
+        sandbox.kill_exec = AsyncMock(return_value=True)
+
+        with (
+            patch("app.orchestrator.load_session", side_effect=mock_load_session),
+            patch("app.orchestrator.load_agent", new_callable=AsyncMock, return_value=agent),
+            patch("app.orchestrator.listen", side_effect=_listen_once()),
+            patch("app.orchestrator.append_event", side_effect=mock_append),
+            patch("app.orchestrator.transition", side_effect=mock_transition),
+            patch("app.orchestrator.update_usage", new_callable=AsyncMock),
+            patch("app.orchestrator.get_provider", return_value=mock_provider),
+            patch("app.orchestrator.dispatch_tool", mock_dispatch),
+            patch("app.orchestrator.build_tool_definitions", return_value=[]),
+            patch("app.orchestrator.check_for_interrupt", new_callable=AsyncMock, return_value=False),
+            patch("app.orchestrator.build_context", new_callable=AsyncMock, return_value=[
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Run a long command"},
+            ]),
+        ):
+            await run_session(_SESSION_ID, sandbox)
+
+        # The sandbox command was killed using the tracked PID.
+        sandbox.kill_exec.assert_awaited_once_with("container-abc123", 1234)
+
+        # tool_use/tool_result pairing kept intact.
+        event_types = [e[0] for e in appended_events]
+        assert "agent.tool_use" in event_types
+        tool_results = [p for etype, p in appended_events if etype == "agent.tool_result"]
+        assert len(tool_results) == 1
+        assert tool_results[0]["tool_use_id"] == "tu1"
+
+        # Turn closed out with idle(end_turn); flag consumed, not leaked.
+        assert transitions[-1] == ("idle", "end_turn")
+        assert not interrupts.is_interrupted(_SESSION_ID)
+
+        # Loop exited (4th load hit the terminated row).
+        assert load_call_count["n"] == 4
+
+    @pytest.mark.asyncio
+    async def test_tool_wins_race_runs_to_completion(self):
+        """No interrupt during dispatch: the tool result flows through the
+        normal path and the waiter is cancelled without side effects."""
+        agent = _make_agent(tools=[
+            BuiltinToolConfig(
+                type="builtin",
+                configs=[
+                    BuiltinToolItemConfig(name="bash", permission_policy="always_allow"),
+                ],
+            ),
+        ])
+        session_row = _make_session_row(status="idle")
+
+        tool_response = ModelResponse(
+            content=[
+                ContentBlock(
+                    type="tool_use",
+                    tool_use_id="tu1",
+                    tool_name="bash",
+                    tool_input={"command": "ls"},
+                ),
+            ],
+            stop_reason="tool_use",
+            usage={"input_tokens": 10, "output_tokens": 5, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+        )
+
+        mock_provider = AsyncMock()
+        setup_mock_provider(mock_provider, response=tool_response)
+
+        appended_events = []
+
+        async def mock_append(sid, etype, payload):
+            appended_events.append((etype, payload))
+            return MagicMock(session_id=sid, cursor="c1", seq=1, type=etype, payload=payload, processed_at=None)
+
+        transitions = []
+
+        async def mock_transition(sid, status, stop_reason=None):
+            transitions.append((status, stop_reason))
+
+        load_call_count = {"n": 0}
+
+        async def mock_load_session(sid):
+            load_call_count["n"] += 1
+            if load_call_count["n"] <= 3:
+                return session_row
+            return {**session_row, "status": "terminated"}
+
+        mock_dispatch = AsyncMock(
+            return_value=('{"stdout": "file.txt", "stderr": "", "exit_code": 0}', "agent.tool_result")
+        )
+
+        sandbox = MagicMock()
+        sandbox.kill_exec = AsyncMock(return_value=True)
+
+        with (
+            patch("app.orchestrator.load_session", side_effect=mock_load_session),
+            patch("app.orchestrator.load_agent", new_callable=AsyncMock, return_value=agent),
+            patch("app.orchestrator.listen", side_effect=_listen_once()),
+            patch("app.orchestrator.append_event", side_effect=mock_append),
+            patch("app.orchestrator.transition", side_effect=mock_transition),
+            patch("app.orchestrator.update_usage", new_callable=AsyncMock),
+            patch("app.orchestrator.get_provider", return_value=mock_provider),
+            patch("app.orchestrator.dispatch_tool", mock_dispatch),
+            patch("app.orchestrator.build_tool_definitions", return_value=[]),
+            patch("app.orchestrator.check_for_interrupt", new_callable=AsyncMock, return_value=False),
+            patch("app.orchestrator.build_context", new_callable=AsyncMock, return_value=[
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Run ls"},
+            ]),
+        ):
+            await run_session(_SESSION_ID, sandbox)
+
+        # No kill: the tool completed normally.
+        sandbox.kill_exec.assert_not_awaited()
+
+        # Normal tool_result, then the loop re-enters the model — here we
+        # assert the result event and that the session was NOT closed out
+        # with idle(end_turn) right after the dispatch (the model turn
+        # continues on the next iteration, which hits the terminated row).
+        tool_results = [p for etype, p in appended_events if etype == "agent.tool_result"]
+        assert len(tool_results) == 1
+        assert tool_results[0]["result"] == '{"stdout": "file.txt", "stderr": "", "exit_code": 0}'
+        assert ("idle", "end_turn") not in transitions
+
+
+# ---------------------------------------------------------------------------
+# Atlas B6 — steer injection
+# ---------------------------------------------------------------------------
+
+
+class TestHasPendingSteer:
+    """Tests for has_pending_steer — unconsumed steer detection."""
+
+    @pytest.mark.asyncio
+    async def test_steer_after_watermark_is_pending(self):
+        from app.orchestrator import has_pending_steer
+
+        with patch("app.orchestrator.fetch_one", new_callable=AsyncMock, return_value={"?column?": 1}):
+            assert await has_pending_steer(_SESSION_ID, 5) is True
+
+    @pytest.mark.asyncio
+    async def test_no_steer_returns_false(self):
+        from app.orchestrator import has_pending_steer
+
+        with patch("app.orchestrator.fetch_one", new_callable=AsyncMock, return_value=None):
+            assert await has_pending_steer(_SESSION_ID, 5) is False
+
+    @pytest.mark.asyncio
+    async def test_query_filters_by_type_and_watermark(self):
+        from app.orchestrator import has_pending_steer
+
+        mock_fetch = AsyncMock(return_value=None)
+        with patch("app.orchestrator.fetch_one", mock_fetch):
+            await has_pending_steer(_SESSION_ID, 12)
+
+        sql = mock_fetch.await_args.args[0]
+        assert "type = 'user.steer'" in sql
+        assert "seq > $2" in sql
+        assert mock_fetch.await_args.args[2] == 12
+
+
+class TestBuildContextSteer:
+    """Atlas B6 — user.steer events replay as injected user messages."""
+
+    @pytest.mark.asyncio
+    async def test_steer_event_rendered_as_injected_user_message(self):
+        agent = _make_agent()
+        rows = [
+            {"type": "user.message", "payload": {"content": "Run the build"}, "seq": 1},
+            {"type": "user.steer", "payload": {"text": "Skip the docs step"}, "seq": 2},
+            {"type": "agent.message", "payload": {"content": "Building..."}, "seq": 3},
+        ]
+        with (
+            patch("app.orchestrator.fetch_all", new_callable=AsyncMock, return_value=rows),
+            patch("app.orchestrator._build_memory_system_block", new_callable=AsyncMock, return_value=""),
+        ):
+            messages = await build_context(_SESSION_ID, agent)
+
+        assert len(messages) == 4
+        assert messages[1] == {"role": "user", "content": "Run the build"}
+        assert messages[2] == {
+            "role": "user",
+            "content": '<steer injected="true">Skip the docs step</steer>',
+        }
+        assert messages[3] == {"role": "assistant", "content": "Building..."}
+
+    @pytest.mark.asyncio
+    async def test_steer_content_key_wins_over_text(self):
+        agent = _make_agent()
+        rows = [
+            {
+                "type": "user.steer",
+                "payload": {"content": "from content", "text": "from text"},
+                "seq": 1,
+            }
+        ]
+        with (
+            patch("app.orchestrator.fetch_all", new_callable=AsyncMock, return_value=rows),
+            patch("app.orchestrator._build_memory_system_block", new_callable=AsyncMock, return_value=""),
+        ):
+            messages = await build_context(_SESSION_ID, agent)
+
+        assert messages[1] == {
+            "role": "user",
+            "content": '<steer injected="true">from content</steer>',
+        }
+
+    @pytest.mark.asyncio
+    async def test_steer_empty_content_falls_back_to_text(self):
+        agent = _make_agent()
+        rows = [
+            {"type": "user.steer", "payload": {"content": "", "text": "real steer"}, "seq": 1}
+        ]
+        with (
+            patch("app.orchestrator.fetch_all", new_callable=AsyncMock, return_value=rows),
+            patch("app.orchestrator._build_memory_system_block", new_callable=AsyncMock, return_value=""),
+        ):
+            messages = await build_context(_SESSION_ID, agent)
+
+        assert messages[1] == {
+            "role": "user",
+            "content": '<steer injected="true">real steer</steer>',
+        }
+
+
+class TestRunSessionSteerContinuation:
+    """Atlas B6 — end_turn close-out with a pending steer keeps running."""
+
+    @pytest.mark.asyncio
+    async def test_pending_steer_continues_without_idling(self):
+        agent = _make_agent()
+        session_row = _make_session_row(status="idle")
+
+        text_response = ModelResponse(
+            content=[ContentBlock(type="text", text="Working on it.")],
+            stop_reason="end_turn",
+            usage={"input_tokens": 10, "output_tokens": 5, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+        )
+
+        mock_provider = AsyncMock()
+        setup_mock_provider(mock_provider, response=text_response)
+
+        appended_events = []
+
+        async def mock_append(sid, etype, payload):
+            appended_events.append((etype, payload))
+            return MagicMock(session_id=sid, cursor="c1", seq=1, type=etype, payload=payload, processed_at=None)
+
+        transitions = []
+
+        async def mock_transition(sid, status, stop_reason=None):
+            transitions.append((status, stop_reason))
+
+        # Iteration 1 (2 loads) + steer-triggered continuation (2 loads),
+        # then a final load returns terminated so the loop exits.
+        load_call_count = {"n": 0}
+
+        async def mock_load_session(sid):
+            load_call_count["n"] += 1
+            if load_call_count["n"] <= 4:
+                return session_row
+            return {**session_row, "status": "terminated"}
+
+        sandbox = MagicMock()
+
+        with (
+            patch("app.orchestrator.load_session", side_effect=mock_load_session),
+            patch("app.orchestrator.load_agent", new_callable=AsyncMock, return_value=agent),
+            patch("app.orchestrator.listen", side_effect=_listen_once()),
+            patch("app.orchestrator.append_event", side_effect=mock_append),
+            patch("app.orchestrator.transition", side_effect=mock_transition),
+            patch("app.orchestrator.update_usage", new_callable=AsyncMock),
+            patch("app.orchestrator.get_provider", return_value=mock_provider),
+            patch("app.orchestrator.build_tool_definitions", return_value=[]),
+            patch("app.orchestrator.check_for_interrupt", new_callable=AsyncMock, return_value=False),
+            patch("app.orchestrator.build_context", new_callable=AsyncMock, return_value=[
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hi"},
+            ]),
+            patch("app.orchestrator.fetch_one", new_callable=AsyncMock, return_value={"seq": 7}),
+            patch("app.orchestrator.has_pending_steer", new_callable=AsyncMock, return_value=True),
+        ):
+            await run_session(_SESSION_ID, sandbox)
+
+        # Steer kept the session running: no idle transition, no
+        # session.status_idle event.
+        assert ("idle", "end_turn") not in transitions
+        event_types = [e[0] for e in appended_events]
+        assert "session.status_idle" not in event_types
+
+        # Two model rounds: the original turn + the steer continuation.
+        span_starts = [p for etype, p in appended_events if etype == "span.model_request_start"]
+        assert len(span_starts) == 2
+
+    @pytest.mark.asyncio
+    async def test_no_pending_steer_idles_normally(self):
+        agent = _make_agent()
+        session_row = _make_session_row(status="idle")
+
+        text_response = ModelResponse(
+            content=[ContentBlock(type="text", text="All done.")],
+            stop_reason="end_turn",
+            usage={"input_tokens": 10, "output_tokens": 5, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+        )
+
+        mock_provider = AsyncMock()
+        setup_mock_provider(mock_provider, response=text_response)
+
+        appended_events = []
+
+        async def mock_append(sid, etype, payload):
+            appended_events.append((etype, payload))
+            return MagicMock(session_id=sid, cursor="c1", seq=1, type=etype, payload=payload, processed_at=None)
+
+        transitions = []
+
+        async def mock_transition(sid, status, stop_reason=None):
+            transitions.append((status, stop_reason))
+
+        load_call_count = {"n": 0}
+
+        async def mock_load_session(sid):
+            load_call_count["n"] += 1
+            if load_call_count["n"] <= 2:
+                return session_row
+            return {**session_row, "status": "terminated"}
+
+        sandbox = MagicMock()
+
+        with (
+            patch("app.orchestrator.load_session", side_effect=mock_load_session),
+            patch("app.orchestrator.load_agent", new_callable=AsyncMock, return_value=agent),
+            patch("app.orchestrator.listen", side_effect=_listen_once()),
+            patch("app.orchestrator.append_event", side_effect=mock_append),
+            patch("app.orchestrator.transition", side_effect=mock_transition),
+            patch("app.orchestrator.update_usage", new_callable=AsyncMock),
+            patch("app.orchestrator.get_provider", return_value=mock_provider),
+            patch("app.orchestrator.build_tool_definitions", return_value=[]),
+            patch("app.orchestrator.check_for_interrupt", new_callable=AsyncMock, return_value=False),
+            patch("app.orchestrator.build_context", new_callable=AsyncMock, return_value=[
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hi"},
+            ]),
+            patch("app.orchestrator.fetch_one", new_callable=AsyncMock, return_value={"seq": 7}),
+            patch("app.orchestrator.has_pending_steer", new_callable=AsyncMock, return_value=False),
+        ):
+            await run_session(_SESSION_ID, sandbox)
+
+        assert ("idle", "end_turn") in transitions
+        event_types = [e[0] for e in appended_events]
+        assert "session.status_idle" in event_types

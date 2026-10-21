@@ -49,9 +49,9 @@ def test_unknown_header_returns_400(client):
     """An unsupported date → 400 with the supported-versions list."""
     resp = client.get("/health", headers={HEADER_NAME: "2099-01-01"})
     assert resp.status_code == 400
-    body = resp.json()["detail"]
+    body = resp.json()
     assert body["error"] == "unsupported_api_version"
-    assert V2_2026_05_13 in body["supported_versions"]
+    assert V2_2026_05_13 in body["detail"]["supported_versions"]
 
 
 def test_v2_header_with_whitespace_normalizes(client):

@@ -18,8 +18,9 @@ from __future__ import annotations
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.auth import AuthContext, require_auth
 from app.db import fetch_all, fetch_one
 from app.models import (
     PaginatedListResponse,
@@ -71,7 +72,10 @@ def _parse_resource_uuid(resource_id: str) -> uuid.UUID:
 
 
 @router.get("", response_model=PaginatedListResponse)
-async def list_session_resources(session_id: str) -> PaginatedListResponse:
+async def list_session_resources(
+    session_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> PaginatedListResponse:
     """List all resources persisted for ``session_id``.
 
     Includes every state ('mounted', 'failed', 'unmounted', 'unmounting').
@@ -83,7 +87,9 @@ async def list_session_resources(session_id: str) -> PaginatedListResponse:
     # 404 distinctly when the session itself doesn't exist, so SDKs can
     # distinguish "no session" from "session has no resources".
     session_row = await fetch_one(
-        "SELECT id FROM sessions WHERE id = $1", session_uid,
+        "SELECT id FROM sessions WHERE id = $1 AND project_id = $2",
+        session_uid,
+        uuid.UUID(ctx.project_id),
     )
     if session_row is None:
         raise HTTPException(
@@ -102,16 +108,24 @@ async def list_session_resources(session_id: str) -> PaginatedListResponse:
 
 
 @router.get("/{resource_id}", response_model=SessionResource)
-async def get_session_resource(session_id: str, resource_id: str) -> SessionResource:
+async def get_session_resource(
+    session_id: str,
+    resource_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> SessionResource:
     """Get a single session resource by id."""
     session_uid = _parse_session_uuid(session_id)
     resource_uid = _parse_resource_uuid(resource_id)
 
+    # JOIN on sessions enforces the tenant boundary — resources inherit
+    # ownership from their session.
     row = await fetch_one(
-        """SELECT * FROM session_resources
-           WHERE id = $1 AND session_id = $2""",
+        """SELECT sr.* FROM session_resources sr
+           JOIN sessions s ON s.id = sr.session_id
+           WHERE sr.id = $1 AND sr.session_id = $2 AND s.project_id = $3""",
         resource_uid,
         session_uid,
+        uuid.UUID(ctx.project_id),
     )
     if row is None:
         raise HTTPException(
@@ -128,6 +142,7 @@ async def get_session_resource(session_id: str, resource_id: str) -> SessionReso
 async def post_session_resource(
     session_id: str,
     body: SessionResourceConfig,
+    ctx: AuthContext = Depends(require_auth),
 ) -> dict:
     """Live resource mount — deferred to v0.2.x per eng-review D1.
 
@@ -143,7 +158,11 @@ async def post_session_resource(
 
 
 @router.delete("/{resource_id}", status_code=501)
-async def delete_session_resource(session_id: str, resource_id: str) -> dict:
+async def delete_session_resource(
+    session_id: str,
+    resource_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> dict:
     """Live resource unmount — deferred to v0.2.x per eng-review D1."""
     _ = session_id
     _ = resource_id

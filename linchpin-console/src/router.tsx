@@ -10,6 +10,7 @@ import SessionListView from './pages/SessionListView';
 import SessionDetailView from './pages/SessionDetailView';
 import VaultListView from './pages/VaultListView';
 import VaultDetailView from './pages/VaultDetailView';
+import UsageView from './pages/UsageView';
 
 export const router = createBrowserRouter([
   {
@@ -26,6 +27,7 @@ export const router = createBrowserRouter([
       { path: '/sessions/:id', element: <SessionDetailView /> },
       { path: '/vaults', element: <VaultListView /> },
       { path: '/vaults/:id', element: <VaultDetailView /> },
+      { path: '/usage', element: <UsageView /> },
     ],
   },
 ]);

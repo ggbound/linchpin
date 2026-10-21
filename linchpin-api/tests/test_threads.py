@@ -222,6 +222,8 @@ def sandbox_client(tmp_path):
         patch("app.main.DockerSandbox") as MockSandbox,
         patch("app.main.cleanup_expired_sessions", new_callable=AsyncMock),
         patch("app.main.recover_sessions", new_callable=AsyncMock),
+        # Atlas A8 — keep the idempotency-key cleanup loop out of test logs.
+        patch("app.main.idempotency_cleanup_loop", new_callable=AsyncMock),
         patch("app.routes.sessions.run_session", new_callable=AsyncMock),
         patch("app.routes.sessions.get_file_store", return_value=fake_store),
         patch("app.routes.sessions.os.path.isfile", return_value=True),
@@ -242,13 +244,15 @@ def sandbox_client(tmp_path):
             yield c, mock_sandbox
 
 
+@patch("app.routes.sessions.transition", new_callable=AsyncMock)
 @patch("app.routes.sessions.execute", new_callable=AsyncMock)
 @patch("app.routes.sessions.fetch_all", new_callable=AsyncMock)
 @patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
 @patch("app.routes.sessions.append_event", new_callable=AsyncMock)
 @patch("app.threads.fetch_one", new_callable=AsyncMock)
 def test_spawn_thread_creates_session_under_parent(
-    mock_threads_fetch_one, mock_append, mock_fetch_one, mock_fetch_all, mock_execute, sandbox_client,
+    mock_threads_fetch_one, mock_append, mock_fetch_one, mock_fetch_all, mock_execute,
+    mock_transition, sandbox_client,
 ):
     client, _ = sandbox_client
     parent_id = str(uuid.uuid4())
@@ -262,11 +266,15 @@ def test_spawn_thread_creates_session_under_parent(
 
     # Route's fetch_one chain:
     # 1) parent existence + archived check
-    # 2-5) create_session: agent, env, INSERT RETURNING, response hydrate
+    # 2-6) create_session: agent, env, INSERT ('provisioning'), post-transition refresh
     mock_fetch_one.side_effect = [
         {"id": uuid.UUID(parent_id), "archived_at": None},
         _make_agent_row(agent_id=agent_id),
         _make_env_row(env_id=env_id),
+        _make_session_row(
+            session_id=thread_sid, agent_id=agent_id, environment_id=env_id,
+        ),
+        # Atlas A2 — post-transition row refresh ends the create path.
         _make_session_row(
             session_id=thread_sid, agent_id=agent_id, environment_id=env_id,
         ),
@@ -360,7 +368,7 @@ def test_spawn_thread_depth_cap_returns_422(
         headers=AUTH,
     )
     assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "thread_depth_exceeded"
+    assert resp.json()["error"] == "thread_depth_exceeded"
 
 
 @patch("app.routes.sessions.fetch_all", new_callable=AsyncMock)

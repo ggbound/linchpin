@@ -95,7 +95,7 @@ def test_stream_session_not_found(mock_fetch, sandbox_client):
     resp = sandbox_client.get(f"/v1/sessions/{sid}/stream", headers=AUTH)
 
     assert resp.status_code == 404
-    assert resp.json()["detail"]["error"] == "not_found"
+    assert resp.json()["error"] == "not_found"
 
 
 def test_stream_session_invalid_uuid(sandbox_client):
@@ -119,7 +119,7 @@ def test_stream_invalid_cursor_returns_422(mock_fetch, sandbox_client):
     )
 
     assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "validation_error"
+    assert resp.json()["error"] == "validation_error"
 
 
 # ---- Auth required ----

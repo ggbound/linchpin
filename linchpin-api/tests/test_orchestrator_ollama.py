@@ -45,7 +45,9 @@ def _make_session_row(status="idle"):
     return {
         "id": uuid.UUID(_SESSION_ID),
         "agent_id": uuid.UUID(_AGENT_ID),
-        "agent_version": 1,
+        # Atlas A1 — no version pin so load_agent_at_version falls through
+        # to the mocked load_agent() without querying agent_versions.
+        "agent_version": None,
         "environment_id": uuid.UUID(_ENV_ID),
         "status": status,
         "container_id": _CONTAINER_ID,
@@ -95,7 +97,7 @@ class TestOrchestratorOllamaWithVault:
 
         transitions = []
 
-        async def mock_transition(sid, status):
+        async def mock_transition(sid, status, stop_reason=None):
             transitions.append(status)
 
         call_count = 0

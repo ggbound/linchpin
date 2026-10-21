@@ -293,10 +293,12 @@ async def _ingest_one(
     inserted = await fetch_one(
         """
         INSERT INTO files
-            (id, filename, content_type, size_bytes,
+            (id, project_id, filename, content_type, size_bytes,
              storage_path, sha256, source, downloadable,
              scope_type, scope_id)
-        VALUES ($1, $2, $3, $4,
+        VALUES ($1,
+                (SELECT project_id FROM sessions WHERE id = $7),
+                $2, $3, $4,
                 $5, $6, 'deliverable', TRUE,
                 'session', $7)
         ON CONFLICT (scope_id, sha256)

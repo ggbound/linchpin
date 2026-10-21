@@ -57,16 +57,32 @@ RETRY_BACKOFF_SECONDS = (10, 60, 300, 1800, 3600)
 
 # Event types the webhook subsystem can fan out. Adding a new entry here
 # requires no other code change — the event-emission hook reads this
-# allowlist at runtime.
+# allowlist at runtime. Atlas A7 — session.status / session.error /
+# session.status_terminated added: those are the types the orchestrator
+# actually emits (A2 unified status). session.created / session.failed /
+# session.terminated have no emit point yet but stay listed for
+# forward-compatibility.
 WEBHOOK_RELEVANT_EVENTS: frozenset[str] = frozenset({
     "session.created",
     "session.status_idle",
     "session.terminated",
     "session.failed",
     "session.requires_action",
+    "session.status",           # Atlas A2/A7 — unified transition event
+    "session.error",            # Atlas A2/A7 — provisioning/model failures
+    "session.status_terminated",
     "vault.credential.created",
     "vault.credential.updated",
     "vault.credential.deleted",
+})
+
+# Atlas A7 — an endpoint whose ``enabled_events`` is empty carries no
+# explicit subscription; it receives the PRD-default lifecycle template
+# (idle / failed / requires_action) instead of nothing.
+DEFAULT_WEBHOOK_EVENTS: frozenset[str] = frozenset({
+    "session.status_idle",
+    "session.error",
+    "session.requires_action",
 })
 
 
@@ -122,22 +138,30 @@ def verify_signature(secret: str, payload: str, header_value: str) -> bool:
 async def enqueue_event(event_type: str, payload: dict[str, Any]) -> int:
     """Fan an event out to every endpoint whose ``enabled_events`` matches.
 
-    Returns the number of delivery rows inserted. Safe to call from
-    inside ``append_event`` — failures here are logged and swallowed so
-    the agent loop doesn't crash on webhook glitches.
+    Endpoints with an empty ``enabled_events`` array fall back to the
+    ``DEFAULT_WEBHOOK_EVENTS`` lifecycle template (Atlas A7). Returns the
+    number of delivery rows inserted. Safe to call from inside
+    ``append_event`` — failures here are logged and swallowed so the
+    agent loop doesn't crash on webhook glitches.
     """
     if event_type not in WEBHOOK_RELEVANT_EVENTS:
         return 0
     try:
         rows = await fetch_all(
             """
-            SELECT id FROM webhook_endpoints
+            SELECT id, enabled_events FROM webhook_endpoints
             WHERE enabled = true
               AND archived_at IS NULL
-              AND enabled_events ? $1
+              AND (enabled_events ? $1 OR jsonb_array_length(enabled_events) = 0)
             """,
             event_type,
         )
+        # Empty subscription = default template, not "everything".
+        rows = [
+            r for r in rows
+            if event_type in r["enabled_events"]
+            or event_type in DEFAULT_WEBHOOK_EVENTS
+        ]
     except Exception:
         logger.exception("webhooks: failed to fetch endpoints for %s", event_type)
         return 0

@@ -20,9 +20,11 @@ import uuid
 from collections.abc import AsyncIterator
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 
+from app.audit import record_audit
+from app.auth import AuthContext, require_auth
 from app.db import execute, fetch_all, fetch_one
 from app.files import FileTooLargeError, get_file_store, get_max_bytes
 from app.models import FileResponse, PaginatedFilesResponse
@@ -77,8 +79,11 @@ async def _upload_file_chunks(upload: UploadFile) -> AsyncIterator[bytes]:
 # ---------------------------------------------------------------------------
 
 @router.post("", response_model=FileResponse, status_code=201)
-async def upload_file(file: UploadFile = File(...)) -> FileResponse:
-    """Upload a file. Persisted with ``source=upload`` and ``downloadable=false``."""
+async def upload_file(
+    file: UploadFile = File(...),
+    ctx: AuthContext = Depends(require_auth),
+) -> FileResponse:
+    """Upload a file. Persisted with ``source=upload`` and ``downloadable=false."""
     store = get_file_store()
     max_bytes = get_max_bytes()
 
@@ -100,17 +105,22 @@ async def upload_file(file: UploadFile = File(...)) -> FileResponse:
     row = await fetch_one(
         """
         INSERT INTO files (
-            filename, content_type, size_bytes, storage_path, sha256,
+            project_id, filename, content_type, size_bytes, storage_path, sha256,
             source, downloadable, scope_type, scope_id
         )
-        VALUES ($1, $2, $3, $4, $5, 'upload', false, NULL, NULL)
+        VALUES ($1, $2, $3, $4, $5, $6, 'upload', false, NULL, NULL)
         RETURNING *
         """,
+        uuid.UUID(ctx.project_id),
         file.filename or "untitled",
         file.content_type or "application/octet-stream",
         size_bytes,
         storage_path,
         sha256,
+    )
+    await record_audit(
+        "file.uploaded", "file", str(row["id"]), ctx=ctx,
+        detail={"filename": file.filename, "size_bytes": size_bytes},
     )
     return _row_to_file(row)
 
@@ -120,20 +130,23 @@ async def list_files(
     scope_id: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    ctx: AuthContext = Depends(require_auth),
 ) -> PaginatedFilesResponse:
     """List files. ``scope_id`` filters by scope; omit it for unscoped uploads only.
 
     No prefix match — scope filtering is exact, so a session cannot list
     another session's deliverables.
     """
+    project_uid = uuid.UUID(ctx.project_id)
     if scope_id is None:
         rows = await fetch_all(
             """
             SELECT * FROM files
-            WHERE archived_at IS NULL AND scope_type IS NULL
+            WHERE project_id = $1 AND archived_at IS NULL AND scope_type IS NULL
             ORDER BY created_at DESC
-            LIMIT $1 OFFSET $2
+            LIMIT $2 OFFSET $3
             """,
+            project_uid,
             limit + 1,
             offset,
         )
@@ -142,12 +155,14 @@ async def list_files(
         rows = await fetch_all(
             """
             SELECT * FROM files
-            WHERE archived_at IS NULL
+            WHERE project_id = $1
+              AND archived_at IS NULL
               AND scope_type = 'session'
-              AND scope_id = $1
+              AND scope_id = $2
             ORDER BY created_at DESC
-            LIMIT $2 OFFSET $3
+            LIMIT $3 OFFSET $4
             """,
+            project_uid,
             scope_uid,
             limit + 1,
             offset,
@@ -163,10 +178,17 @@ async def list_files(
 
 
 @router.get("/{file_id}", response_model=FileResponse)
-async def get_file(file_id: str) -> FileResponse:
+async def get_file(
+    file_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> FileResponse:
     """Get file metadata."""
     file_uid = _parse_uuid(file_id, "File")
-    row = await fetch_one("SELECT * FROM files WHERE id = $1", file_uid)
+    row = await fetch_one(
+        "SELECT * FROM files WHERE id = $1 AND project_id = $2",
+        file_uid,
+        uuid.UUID(ctx.project_id),
+    )
     if row is None or row["archived_at"] is not None:
         raise HTTPException(
             status_code=404,
@@ -176,10 +198,17 @@ async def get_file(file_id: str) -> FileResponse:
 
 
 @router.get("/{file_id}/content")
-async def get_file_content(file_id: str) -> StreamingResponse:
+async def get_file_content(
+    file_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> StreamingResponse:
     """Stream file bytes. Returns 403 if the file is not marked downloadable."""
     file_uid = _parse_uuid(file_id, "File")
-    row = await fetch_one("SELECT * FROM files WHERE id = $1", file_uid)
+    row = await fetch_one(
+        "SELECT * FROM files WHERE id = $1 AND project_id = $2",
+        file_uid,
+        uuid.UUID(ctx.project_id),
+    )
     if row is None or row["archived_at"] is not None:
         raise HTTPException(
             status_code=404,
@@ -219,10 +248,17 @@ async def get_file_content(file_id: str) -> StreamingResponse:
 
 
 @router.delete("/{file_id}", status_code=204)
-async def delete_file(file_id: str):
+async def delete_file(
+    file_id: str,
+    ctx: AuthContext = Depends(require_auth),
+):
     """Hard-delete a file: removes the DB row and the stored bytes."""
     file_uid = _parse_uuid(file_id, "File")
-    row = await fetch_one("SELECT * FROM files WHERE id = $1", file_uid)
+    row = await fetch_one(
+        "SELECT * FROM files WHERE id = $1 AND project_id = $2",
+        file_uid,
+        uuid.UUID(ctx.project_id),
+    )
     if row is None:
         raise HTTPException(
             status_code=404,
@@ -257,6 +293,10 @@ async def delete_file(file_id: str):
         )
 
     await execute("DELETE FROM files WHERE id = $1", file_uid)
+    await record_audit(
+        "file.deleted", "file", file_id, ctx=ctx,
+        detail={"filename": row["filename"]},
+    )
 
     # Storage bytes are content-addressed and may be shared with other rows
     # that uploaded the same content. Only drop bytes when no other live row

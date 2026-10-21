@@ -20,17 +20,40 @@ from typing import Any, Awaitable, Callable, Literal
 
 import httpx
 
+from app.audit import record_audit
 from app.db import execute, fetch_all, fetch_one, listen, notify
+# Atlas C2 — cross-replica session lease (advisory lock + heartbeat)
+from app.cluster import LeaseHeldElsewhere, SessionLease, get_instance_id
+from app.event_crypto import decrypt_payload, get_session_data_key
 from app.events import append_event
 from app.models import Agent, BuiltinToolConfig, CustomToolConfig, MCPServerConfig, ModelConfig
 from app.policy import PolicyEvaluator
-from app.providers import ContentBlock, ModelResponse, ProviderError, StreamChunk, get_provider
-from app.sandbox import DockerSandbox
+from app.providers import (
+    ContentBlock,
+    ModelResponse,
+    ProviderError,
+    RetryableError,
+    StreamChunk,
+    get_provider,
+)
+from app.sandbox import DockerSandbox, SandboxError
 from app.tools import execute_builtin_tool
 from app.credentials import CredentialResolver
 from app.streaming import start_stream, append_delta, finish_stream
+from app.compaction import maybe_compact
+# Atlas B2 — in-process per-session interrupt flags
+from app import interrupts
+# Atlas B10 — OTel tracing hooks (dual-write alongside span.* events)
+from app import tracing
 
 logger = logging.getLogger("linchpin-api.orchestrator")
+
+# Atlas C2 — session lease heartbeat cadence and staleness threshold. Each
+# lease holder re-stamps sessions.orchestrator_heartbeat every
+# HEARTBEAT_INTERVAL_SEC; the lease supervisor reclaims sessions whose
+# heartbeat is older than LEASE_TIMEOUT_SEC.
+HEARTBEAT_INTERVAL_SEC = float(os.environ.get("LINCHPIN_HEARTBEAT_INTERVAL_SEC", "10"))
+LEASE_TIMEOUT_SEC = float(os.environ.get("LINCHPIN_LEASE_TIMEOUT_SEC", "60"))
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +96,13 @@ async def load_agent(agent_id: str) -> Agent:
     mcp_servers = json.loads(mcp_raw) if isinstance(mcp_raw, str) else mcp_raw
     model = json.loads(model_raw) if isinstance(model_raw, str) else model_raw
 
+    # FR-6.1 — keys-check keeps older test mocks (rows without the column)
+    # loading as an empty roster.
+    multi_agents: list = []
+    if "multi_agents" in set(row.keys()):
+        raw = row["multi_agents"]
+        multi_agents = json.loads(raw) if isinstance(raw, str) else (raw or [])
+
     return Agent(
         id=str(row["id"]),
         name=row["name"],
@@ -81,17 +111,75 @@ async def load_agent(agent_id: str) -> Agent:
         system=row["system"],
         tools=tools,
         mcp_servers=mcp_servers,
+        multi_agents=multi_agents,
         created_at=row["created_at"],
     )
 
 
+async def load_agent_at_version(agent_id: str, version: int | None) -> Agent:
+    """Fetch the agent config pinned at ``version`` (Atlas A1).
 
-async def transition(session_id: str, new_status: str) -> None:
-    """Update a session's status in the database."""
+    Sessions pin ``agent_version`` at create time; each turn must load
+    that snapshot — not the live agent row — so mid-session PATCHes
+    don't retroactively change running or recovering sessions. Reads
+    the ``agent_versions`` snapshot written on every PATCH (0006).
+    Falls back to the live ``agents`` row when the snapshot is missing
+    (historical rows created before versioning existed).
+    """
+    if version is not None:
+        row = await fetch_one(
+            "SELECT * FROM agent_versions WHERE agent_id = $1 AND version = $2",
+            uuid.UUID(agent_id),
+            int(version),
+        )
+        if row is not None:
+            tools_raw = row["tools"]
+            mcp_raw = row["mcp_servers"]
+            model_raw = row["model"]
+            tools = json.loads(tools_raw) if isinstance(tools_raw, str) else tools_raw
+            mcp_servers = json.loads(mcp_raw) if isinstance(mcp_raw, str) else mcp_raw
+            model = json.loads(model_raw) if isinstance(model_raw, str) else model_raw
+
+            multi_agents = []
+            if "multi_agents" in set(row.keys()):
+                raw = row["multi_agents"]
+                multi_agents = json.loads(raw) if isinstance(raw, str) else (raw or [])
+
+            return Agent(
+                id=str(row["agent_id"]),
+                name=row["name"],
+                version=row["version"],
+                model=ModelConfig(**model),
+                system=row["system"],
+                tools=tools,
+                mcp_servers=mcp_servers,
+                multi_agents=multi_agents,
+                created_at=row["snapshotted_at"],
+            )
+    return await load_agent(agent_id)
+
+
+
+# Atlas A2 — automatic retry budget for retryable provider failures.
+MAX_RETRIES = 3
+
+
+async def transition(
+    session_id: str, new_status: str, stop_reason: str | None = None
+) -> None:
+    """Update a session's status + stop_reason in the database (Atlas A2).
+
+    ``stop_reason`` is written verbatim on every call (NULL clears it) so
+    each transition states why the session is in its new state:
+    'end_turn', 'requires_action', 'retries_exhausted', 'retrying',
+    'provisioning_failed', 'provider_error', 'credential_missing', ...
+    """
     uid = uuid.UUID(session_id)
     await fetch_one(
-        "UPDATE sessions SET status = $1, updated_at = now() WHERE id = $2 RETURNING id",
+        "UPDATE sessions SET status = $1, stop_reason = $2, updated_at = now() "
+        "WHERE id = $3 RETURNING id",
         new_status,
+        stop_reason,
         uid,
     )
 
@@ -151,6 +239,61 @@ ToolKind = Literal["builtin", "mcp", "custom_http"]
 def get_connector_url() -> str:
     """Return the connector base URL from env var (default: http://linchpin-connector:8001)."""
     return os.environ.get("CONNECTOR_URL", "http://linchpin-connector:8001")
+
+
+# Atlas M4 (FR-5.6) — the meta-tool exposed when tool search mode is
+# active. The full catalog is withheld; the model must search first, and
+# matches are activated for the remainder of the session run.
+TOOL_SEARCH_DEF = {
+    "name": "tool_search",
+    "description": (
+        "Search the full tool catalog by keyword. Use this to discover "
+        "tools before calling them — calling a tool that has not been "
+        "activated by a previous search will fail."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": (
+                    "Space-separated keywords matched against tool names "
+                    "and descriptions."
+                ),
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+
+def search_tool_definitions(
+    query: str, all_tools: list[dict[str, Any]], limit: int = 10,
+) -> list[dict[str, Any]]:
+    """FR-5.6 — keyword search over the assembled tool catalog.
+
+    Space-separated terms are OR-matched case-insensitively against
+    name (weight 2) and description (weight 1); matches are returned
+    best-first, ties broken by catalog order. An empty query or no hit
+    returns an empty list — the caller surfaces a retry note.
+    """
+    terms = [t.lower() for t in query.split() if t.strip()]
+    if not terms:
+        return []
+    scored: list[tuple[float, int, dict[str, Any]]] = []
+    for idx, tool in enumerate(all_tools):
+        name = str(tool.get("name", "")).lower()
+        description = str(tool.get("description", "")).lower()
+        score = 0.0
+        for term in terms:
+            if term in name:
+                score += 2.0
+            if term in description:
+                score += 1.0
+        if score > 0:
+            scored.append((score, idx, tool))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [dict(item[2]) for item in scored[:limit]]
 
 
 def classify_tool(tool_name: str, agent: Agent) -> ToolKind:
@@ -383,6 +526,22 @@ async def build_context(session_id: str, agent: Agent) -> list[dict]:
 
     messages: list[dict] = []
 
+    # Atlas B1 — find the effective compaction summary: the compacted event
+    # covering the most history. Everything at or below its covered_seq_end
+    # (older compacted events included) is folded into that summary and
+    # skipped during replay.
+    covered_end = 0
+    compaction_summary: str | None = None
+    for row in rows:
+        if row["type"] == "session.compacted":
+            compacted_payload = row["payload"]
+            if isinstance(compacted_payload, str):
+                compacted_payload = json.loads(compacted_payload)
+            row_covered_end = int(compacted_payload.get("covered_seq_end", 0) or 0)
+            if row_covered_end > covered_end:
+                covered_end = row_covered_end
+                compaction_summary = compacted_payload.get("summary") or None
+
     # System message first. v0.3.0 — auto-inject the <linchpin:memory>
     # block summarizing every memory_store resource mounted into this
     # session, so the agent learns about its persistent state without
@@ -399,11 +558,29 @@ async def build_context(session_id: str, agent: Agent) -> list[dict]:
     if system:
         messages.append({"role": "system", "content": system})
 
+    # Atlas B1 — inject the effective compaction summary as a system message
+    # so the model sees a condensed history in place of the covered prefix.
+    if compaction_summary:
+        messages.append({
+            "role": "system",
+            "content": f"<session_summary>\n{compaction_summary}\n</session_summary>",
+        })
+
+    # Atlas B8 — encrypted sessions store business-content payloads as
+    # {"enc":"v1","ct":...} envelopes; resolve the data key once and
+    # decrypt as rows stream through. Control events (session.*) are
+    # stored plaintext, so the pre-scan above needs no decryption.
+    data_key = await get_session_data_key(uid)
+
     for row in rows:
+        # Atlas B1 — skip events folded into the effective summary.
+        if row["seq"] <= covered_end:
+            continue
         event_type = row["type"]
         payload = row["payload"]
         if isinstance(payload, str):
             payload = json.loads(payload)
+        payload = decrypt_payload(payload, data_key)
 
         if event_type == "user.message":
             # v0.5.0 — pass content blocks through verbatim so providers
@@ -422,6 +599,23 @@ async def build_context(session_id: str, agent: Agent) -> list[dict]:
             if isinstance(content, list):
                 content = await _resolve_file_sources(content)
             messages.append({"role": "user", "content": content})
+
+        elif event_type == "user.steer":
+            # Atlas B6 — replay steer events as user-role messages wrapped
+            # in a <steer> tag and marked injected=true. Steers land in the
+            # event log mid-turn (the A4 gate admits user.steer while
+            # running); build_context is the single injection point, so
+            # both the next tool-round and the post-steer continuation see
+            # them in order relative to agent messages and tool results.
+            steer_text = payload.get("content")
+            if steer_text is None or steer_text == "":
+                steer_text = payload.get("text", "")
+            if isinstance(steer_text, list):
+                steer_text = await _resolve_file_sources(steer_text)
+            messages.append({
+                "role": "user",
+                "content": f'<steer injected="true">{steer_text}</steer>',
+            })
 
         elif event_type == "agent.message":
             messages.append({"role": "assistant", "content": payload.get("content", "")})
@@ -548,6 +742,35 @@ def build_tool_definitions(agent: Agent) -> list[dict]:
                 "description": getattr(tool, "description", ""),
                 "input_schema": getattr(tool, "input_schema", {"type": "object", "properties": {}}),
             })
+    # FR-6.1 — declared subagents surface a spawn_subagent tool so the
+    # model can hand work off to worker threads pinned in agent config.
+    if agent.multi_agents:
+        roster = ", ".join(
+            f"{s.name} ({s.description})" if s.description else s.name
+            for s in agent.multi_agents
+        )
+        tools.append({
+            "name": "spawn_subagent",
+            "description": (
+                "Spawn a worker thread handled by a declared subagent agent. "
+                f"Available workers: {roster}."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "enum": [s.name for s in agent.multi_agents],
+                        "description": "Which declared subagent to spawn.",
+                    },
+                    "input_message": {
+                        "type": "string",
+                        "description": "Task instruction for the worker thread.",
+                    },
+                },
+                "required": ["name", "input_message"],
+            },
+        })
     return tools
 
 
@@ -632,8 +855,16 @@ async def wait_for_confirmation(session_id: str, tool_use_id: str) -> dict:
     """
     channel = f"session_{session_id.replace('-', '_')}"
     uid = uuid.UUID(session_id)
+    # Atlas B8 — data key for decrypting encrypted confirmation payloads.
+    data_key = await get_session_data_key(uid)
 
     async for _payload in listen(channel):
+        # Atlas B2 — requires_action admits user.interrupt, so the wait
+        # must break when one lands. Return a deny sentinel: the caller's
+        # deny branch appends an error result, and the loop-top DB check
+        # then consumes the interrupt and closes the turn out.
+        if interrupts.is_interrupted(session_id):
+            return {"result": "deny", "deny_message": "Interrupted"}
         # Check for a tool_confirmation event matching our tool_use_id
         rows = await fetch_all(
             """
@@ -647,6 +878,9 @@ async def wait_for_confirmation(session_id: str, tool_use_id: str) -> dict:
             ev_payload = row["payload"]
             if isinstance(ev_payload, str):
                 ev_payload = json.loads(ev_payload)
+            # Atlas B8 — user.tool_confirmation is business content and
+            # may be stored encrypted; decrypt before matching.
+            ev_payload = decrypt_payload(ev_payload, data_key)
             if ev_payload.get("tool_use_id") == tool_use_id:
                 return ev_payload
 
@@ -661,8 +895,14 @@ async def wait_for_custom_tool_result(session_id: str, tool_use_id: str) -> dict
     """
     channel = f"session_{session_id.replace('-', '_')}"
     uid = uuid.UUID(session_id)
+    # Atlas B8 — data key for decrypting encrypted tool-result payloads.
+    data_key = await get_session_data_key(uid)
 
     async for _payload in listen(channel):
+        # Atlas B2 — same interrupt escape hatch as wait_for_confirmation:
+        # break the wait, let the loop-top DB check close the turn out.
+        if interrupts.is_interrupted(session_id):
+            return {"result": "", "error": "Interrupted", "interrupted": True}
         rows = await fetch_all(
             """
             SELECT * FROM events
@@ -675,6 +915,9 @@ async def wait_for_custom_tool_result(session_id: str, tool_use_id: str) -> dict
             ev_payload = row["payload"]
             if isinstance(ev_payload, str):
                 ev_payload = json.loads(ev_payload)
+            # Atlas B8 — user.custom_tool_result is business content and
+            # may be stored encrypted; decrypt before matching.
+            ev_payload = decrypt_payload(ev_payload, data_key)
             if ev_payload.get("tool_use_id") == tool_use_id:
                 return ev_payload
 
@@ -766,7 +1009,13 @@ async def dispatch_tool(
             if not container_id:
                 return json.dumps({"error": "No container associated with session"}), "agent.tool_result"
 
-            result = await execute_builtin_tool(tool_name, tool_input, sandbox, container_id)
+            # Atlas B5: pass session attribution so tools like save_artifact
+            # can write API-side resources (files rows) owned by this session.
+            context = {
+                "session_id": session_id,
+                "project_id": str(session["project_id"]) if session.get("project_id") else None,
+            }
+            result = await execute_builtin_tool(tool_name, tool_input, sandbox, container_id, context)
             return json.dumps(result), "agent.tool_result"
 
     except Exception as exc:
@@ -797,24 +1046,145 @@ async def check_for_interrupt(session_id: str) -> bool:
 
 async def handle_interrupt(session_id: str) -> None:
     """Transition session to idle with stop_reason='interrupt'."""
+    # Atlas B2 — this is an interrupt consumption point: clear the
+    # in-process flag so it can't leak into the next streaming turn.
+    interrupts.clear_interrupt(session_id)
     await transition(session_id, "idle")
     await append_event(session_id, "session.status_idle", {
         "stop_reason": "interrupt",
     })
 
 
-async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
+async def has_pending_steer(session_id: str, since_seq: int) -> bool:
+    """Atlas B6 — True when an unconsumed user.steer exists.
+
+    A steer counts as pending only when it was appended after the
+    current turn started (seq > since_seq). Steers at or before the
+    watermark were already replayed into context by build_context;
+    counting them would make end_turn re-run the agent forever on a
+    stale steer.
+    """
+    uid = uuid.UUID(session_id)
+    try:
+        row = await fetch_one(
+            """
+            SELECT 1 FROM events
+            WHERE session_id = $1 AND type = 'user.steer' AND seq > $2
+            LIMIT 1
+            """,
+            uid,
+            since_seq,
+        )
+    except Exception:
+        # Best-effort (same contract as maybe_compact): steer is advisory.
+        # Fail closed — the session still idles normally, it just doesn't
+        # get a steer continuation this round.
+        logger.warning("has_pending_steer lookup failed for session %s", session_id, exc_info=True)
+        return False
+    return row is not None
+
+
+async def _acquire_session_lease(session_id: str) -> SessionLease | None:
+    """Try to acquire the cross-replica session lease (Atlas C2).
+
+    Returns the held lease, or ``None`` when running unleased — no DB pool
+    (unit tests, single-process mode) or a transient lease-stamp failure
+    (in-process locks plus the events-table PK remain the correctness
+    story). Raises :class:`LeaseHeldElsewhere` when another live replica
+    owns the lease.
+    """
+    lease = SessionLease(session_id)
+    try:
+        acquired = await lease.acquire()
+    except RuntimeError:
+        # No asyncpg pool (unit tests): in-process orchestration task
+        # tracking already guarantees a single owner per session.
+        return None
+    except Exception:
+        # Pool/DB hiccup right at acquisition: run unleased rather than
+        # fail the session — double-append is guarded by the events PK.
+        logger.warning(
+            "Session lease unavailable for %s; running unleased", session_id,
+            exc_info=True,
+        )
+        return None
+    if not acquired:
+        raise LeaseHeldElsewhere(
+            f"Session {session_id} is leased by another orchestrator instance"
+        )
+    return lease
+
+
+async def _lease_heartbeat(lease: SessionLease, interval: float) -> None:
+    """Background task refreshing the lease while the session runs.
+
+    On the first failed renewal the lease marks itself broken; the main
+    loop checks at the top of each iteration and exits so the supervisor
+    (or another replica) can take the session over.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        if not await lease.renew():
+            logger.warning(
+                "Session %s lease lost (instance %s)",
+                lease.session_id, get_instance_id(),
+            )
+            return
+
+
+async def run_session(
+    session_id: str, sandbox: DockerSandbox, *, lease: SessionLease | None = None
+) -> None:
+    """Run the orchestrator loop, guarded by a cross-replica session lease.
+
+    Atlas C2: the lease is a Postgres advisory lock bound to a dedicated
+    pool connection — it dies with the connection, so a crashed holder can
+    never block takeover. A background heartbeat refreshes the lease (and
+    ``sessions.orchestrator_heartbeat``) while the loop runs. Pass
+    ``lease`` when the caller already holds one (lease supervisor takeover)
+    to avoid a release→re-acquire race window.
+    """
+    if lease is None:
+        try:
+            lease = await _acquire_session_lease(session_id)
+        except LeaseHeldElsewhere:
+            logger.info(
+                "Session %s leased by another instance; not starting here", session_id,
+            )
+            return
+    heartbeat_task: asyncio.Task | None = None
+    if lease is not None:
+        heartbeat_task = asyncio.create_task(
+            _lease_heartbeat(lease, HEARTBEAT_INTERVAL_SEC)
+        )
+    try:
+        await _run_session_loop(session_id, sandbox, lease)
+    finally:
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+        if lease is not None:
+            await lease.release()
+
+
+async def _run_session_loop(
+    session_id: str, sandbox: DockerSandbox, lease: SessionLease | None
+) -> None:
     """Main orchestrator loop for a single session.
 
     Runs as an async task. Loops:
-    1. Load session, exit if terminal state
-    2. Wait for input via LISTEN/NOTIFY
-    3. Check for user.interrupt — if so, transition to idle
-    4. Build context from event log
-    5. Send to model provider
-    6. Process response blocks (thinking, text, tool_use)
-    7. Between tool calls, check for interrupts
-    8. If end_turn, transition to idle; if tool calls, loop back
+    1. Exit if the lease was lost to another replica (Atlas C2)
+    2. Load session, exit if terminal state
+    3. Wait for input via LISTEN/NOTIFY
+    4. Check for user.interrupt — if so, transition to idle
+    5. Build context from event log
+    6. Send to model provider
+    7. Process response blocks (thinking, text, tool_use)
+    8. Between tool calls, check for interrupts
+    9. If end_turn, transition to idle; if tool calls, loop back
     """
     logger.info("Orchestrator started for session %s", session_id)
 
@@ -825,14 +1195,30 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
     # idle transitions or session start.
     needs_input = True
 
+    # Atlas M4 (FR-5.6) — deferred tool loading state. ``activated`` holds
+    # tool names surfaced by earlier tool_search calls; it lives for the
+    # whole _run_session_loop invocation (across steer re-entries) and is
+    # reset on the next run_session — cheap to re-search, no stale state.
+    activated: set[str] = set()
+    search_mode = False
+    search_max_results = 10
+
     while True:
         try:
+            # Atlas C2 — lease broken (heartbeat couldn't renew): another
+            # instance now owns this session; exit instead of double-driving.
+            if lease is not None and lease.broken:
+                logger.warning("Session %s lease lost; orchestrator exiting.", session_id)
+                tracing.end_session_tracing(session_id)
+                return
+
             # 1. Load session from DB
             session = await load_session(session_id)
             status = session["status"]
 
             if status in ("terminated", "failed"):
                 logger.info("Session %s is %s, orchestrator exiting.", session_id, status)
+                tracing.end_session_tracing(session_id)
                 return
 
             # 2. Wait for input event via LISTEN/NOTIFY — skipped when we
@@ -850,6 +1236,7 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
             status = session["status"]
             if status in ("terminated", "failed"):
                 logger.info("Session %s is %s after wake, orchestrator exiting.", session_id, status)
+                tracing.end_session_tracing(session_id)
                 return
 
             # 3. Check for user.interrupt before processing
@@ -861,16 +1248,45 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
             # Transition to running
             await transition(session_id, "running")
 
-            # 4. Load agent config from DB
-            agent = await load_agent(str(session["agent_id"]))
+            # Atlas B10 — open this iteration's agent.turn span (implicitly
+            # closes the previous turn's span). No-op unless OTel is enabled.
+            tracing.start_turn(session_id)
 
-            # 5. Build conversation context from event log
-            messages = await build_context(session_id, agent)
+            # Atlas B6 — watermark of the current turn's start. A steer is
+            # "pending" (unconsumed) only when its seq exceeds this value.
+            # Re-taken every iteration: after a steer-triggered
+            # continuation the new watermark covers the consumed steer, so
+            # it can't trigger another round. Best-effort: 0 on failure —
+            # production always has a pool; tests without one degrade to
+            # the idle path (has_pending_steer fails closed in parallel).
+            try:
+                turn_start_row = await fetch_one(
+                    "SELECT COALESCE(MAX(seq), 0) AS seq FROM events WHERE session_id = $1",
+                    uuid.UUID(session_id),
+                )
+                turn_start_seq = turn_start_row["seq"] if turn_start_row else 0
+            except Exception:
+                logger.warning("Turn watermark lookup failed for session %s", session_id, exc_info=True)
+                turn_start_seq = 0
 
-            # 6. Resolve API key from vaults (if session has vault_ids).
+            # 4. Load agent config pinned to the session's agent_version
+            # (Atlas A1) so mid-session agent PATCHes don't leak into an
+            # already-running or recovering session.
+            agent = await load_agent_at_version(
+                str(session["agent_id"]), session["agent_version"]
+            )
+
+            # 5. Resolve API key from vaults (if session has vault_ids).
             # Sessions without vault_ids fall through to the env-var lookup
             # below (and providers that don't need a key, like Ollama, may
             # leave it as None).
+            #
+            # Atlas B11 — the key name is keyed off the provider string, not
+            # the endpoint: a gateway (e.g. LiteLLM) is reached via
+            # provider="openrouter" + model.base_url override, so the env
+            # fallback stays OPENROUTER_API_KEY and vault credentials match
+            # on provider="openrouter" regardless of which upstream serves
+            # the request. See docs/model-gateway.md.
             env_var_map = {
                 "openrouter": "OPENROUTER_API_KEY",
             }
@@ -894,15 +1310,47 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
                                      f"{env_var_name or agent.model.provider.upper() + '_API_KEY'} environment variable.",
                             "source": "credential_resolution",
                         })
-                        await transition(session_id, "failed")
+                        await transition(session_id, "failed", stop_reason="credential_missing")
+                        tracing.end_session_tracing(session_id)
                         return
             else:
                 # No vault bound — fall back to env var so the provider has auth.
                 resolved_api_key = env_key or None
 
-            # 7. Get model provider and stream
+            # 6. Get model provider (compaction below reuses the resolved key)
             provider = get_provider(agent.model)
-            tools = await build_tool_definitions_with_mcp(agent, session_id, vault_ids=vault_ids)
+
+            # Atlas B1 — compact the covered prefix of the event log into a
+            # summary before rebuilding context when the token estimate is
+            # near the model's context window. Best-effort: failure degrades
+            # to no compaction and never breaks the agent loop.
+            await maybe_compact(session_id, agent, provider, api_key=resolved_api_key)
+
+            # 7. Build conversation context from event log
+            messages = await build_context(session_id, agent)
+            all_tools = await build_tool_definitions_with_mcp(agent, session_id, vault_ids=vault_ids)
+
+            # Atlas M4 (FR-5.6) — deferred tool loading. When the session's
+            # environment enabled tool_search and the assembled catalog is
+            # larger than the threshold, only the meta-tool plus previously
+            # activated tools ride on the model request.
+            ts_cfg = (session.get("metadata") or {}).get("tool_search") \
+                if isinstance(session.get("metadata"), dict) else None
+            if isinstance(ts_cfg, dict) and ts_cfg.get("enabled"):
+                try:
+                    threshold = max(1, int(ts_cfg.get("threshold", 20)))
+                    search_max_results = max(1, int(ts_cfg.get("max_results", 10)))
+                except (TypeError, ValueError):
+                    threshold, search_max_results = 20, 10
+                search_mode = len(all_tools) > threshold
+            else:
+                search_mode = False
+            if search_mode:
+                tools = [dict(TOOL_SEARCH_DEF)] + [
+                    t for t in all_tools if t.get("name") in activated
+                ]
+            else:
+                tools = all_tools
 
             # --- Streaming integration ---
             message_id = str(uuid.uuid4())
@@ -911,6 +1359,7 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
             stop_reason: str | None = None
             usage = {"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
             deltas_emitted = False
+            stream_interrupted = False
 
             # Start in-memory stream for live delta delivery (no DB writes for deltas)
             await start_stream(session_id, message_id)
@@ -934,11 +1383,26 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
             except Exception:
                 logger.exception("failed to append span.model_request_start")
 
+            # Atlas B10 — mirror the span into OpenTelemetry (no-op unless
+            # LINCHPIN_OTEL_ENABLED). Kept outside the append try-block: a
+            # tracing failure must never affect the event log.
+            tracing.record_model_request_start(
+                session_id, span_id, agent.model.provider, agent.model.id,
+            )
+
             span_error: str | None = None
+            stream_gen = provider.send_streaming(
+                messages, agent.model, tools or None, api_key=resolved_api_key,
+            )
             try:
-                async for chunk in provider.send_streaming(
-                    messages, agent.model, tools or None, api_key=resolved_api_key,
-                ):
+                async for chunk in stream_gen:
+                    # Atlas B2 — check the in-process interrupt flag every
+                    # chunk. On interrupt, drop the generator: its finally
+                    # closes the httpx stream, cancelling the request.
+                    if interrupts.is_interrupted(session_id):
+                        stream_interrupted = True
+                        logger.info("Session %s interrupted mid-stream.", session_id)
+                        break
                     if chunk.type == "text_delta":
                         accumulated_text += chunk.text or ""
                         # Write to in-memory buffer only — no DB write
@@ -975,6 +1439,14 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
                     })
                 except Exception:
                     logger.exception("failed to append span.model_request_end on failure")
+
+                # Atlas B10 — close the OTel model_request span with the error.
+                tracing.record_model_request_end(
+                    session_id, span_id,
+                    usage=usage,
+                    elapsed_ms=int((time.monotonic() - span_started_at) * 1000),
+                    error=span_error,
+                )
                 # Clean up the in-memory stream
                 asyncio.create_task(finish_stream(session_id))
                 if deltas_emitted:
@@ -983,10 +1455,19 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
                         "error": str(stream_exc),
                         "source": "streaming",
                     })
-                    await transition(session_id, "failed")
+                    await transition(session_id, "failed", stop_reason="provider_error")
+                    tracing.end_session_tracing(session_id)
                     return
                 else:
                     raise
+            finally:
+                # Atlas B2 — close the async generator so the provider's
+                # finally runs (httpx stream aclose) even after a mid-stream
+                # interrupt break. No-op when the generator is exhausted.
+                try:
+                    await stream_gen.aclose()
+                except Exception:
+                    logger.exception("failed to close streaming generator")
 
             # Mark stream as done (cleanup happens after delay)
             asyncio.create_task(finish_stream(session_id))
@@ -1008,12 +1489,66 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
             except Exception:
                 logger.exception("failed to append span.model_request_end")
 
+            # Atlas B10 — close the OTel model_request span (success path).
+            tracing.record_model_request_end(
+                session_id, span_id,
+                usage=usage,
+                elapsed_ms=int((time.monotonic() - span_started_at) * 1000),
+            )
+
             # 8. Update usage stats
             await update_usage(session_id, usage)
+
+            # Atlas B1 — calibrate the context estimate from the provider's
+            # real usage (input + output + cache). GREATEST keeps the stored
+            # estimate monotone across compaction resets. Best-effort: this
+            # must never break the agent loop.
+            try:
+                calibrated = sum(
+                    int(usage.get(key, 0) or 0)
+                    for key in (
+                        "input_tokens",
+                        "output_tokens",
+                        "cache_creation_input_tokens",
+                        "cache_read_input_tokens",
+                    )
+                )
+                await execute(
+                    "UPDATE sessions SET context_estimate = GREATEST(context_estimate, $1) "
+                    "WHERE id = $2",
+                    calibrated,
+                    uuid.UUID(session_id),
+                )
+            except Exception:
+                logger.exception("failed to calibrate context_estimate")
+
+            # Atlas A2 — a completed model turn resets the retryable-error
+            # counter, giving the next failure a fresh retry budget.
+            if session.get("retry_count"):
+                await execute(
+                    "UPDATE sessions SET retry_count = 0 WHERE id = $1",
+                    uuid.UUID(session_id),
+                )
 
             # 9. Emit final agent.message with full accumulated content
             if accumulated_text:
                 await append_event(session_id, "agent.message", {"content": accumulated_text})
+
+            # Atlas B2 — the stream was interrupted mid-flight. The partial
+            # text above is already persisted as agent.message and no tool
+            # has run this turn; close out with idle(end_turn) per the plan.
+            if stream_interrupted:
+                interrupts.clear_interrupt(session_id)
+                await transition(session_id, "idle", stop_reason="end_turn")
+                await append_event(session_id, "session.status", {
+                    "status": "idle",
+                    "stop_reason": "end_turn",
+                })
+                await append_event(session_id, "session.status_idle", {
+                    "stop_reason": "end_turn",
+                })
+                needs_input = True
+                continue
 
             # 10. Process tool_use content blocks
             has_tool_calls = len(content_blocks) > 0
@@ -1043,6 +1578,41 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
                     "input": block.tool_input or {},
                 })
 
+                # Atlas M4 (FR-5.6) — tool search interception. Handled
+                # inline (before policy evaluation: the meta-tool is not in
+                # agent.tools, so the evaluator would gate it behind a
+                # confirmation the user never asked for). Matches are
+                # activated for the rest of the session run and returned to
+                # the model as the tool_result payload.
+                if search_mode:
+                    if block.tool_name == "tool_search":
+                        query = str((block.tool_input or {}).get("query", ""))
+                        matches = search_tool_definitions(
+                            query, all_tools, search_max_results,
+                        )
+                        activated.update(m.get("name", "") for m in matches)
+                        payload: dict[str, Any] = {"tools": matches}
+                        if not matches:
+                            payload["note"] = (
+                                "No tools matched the query. Try broader "
+                                "keywords."
+                            )
+                        await append_event(session_id, "agent.tool_result", {
+                            "tool_use_id": block.tool_use_id or "",
+                            "result": json.dumps(payload),
+                        })
+                        continue
+                    if block.tool_name not in activated:
+                        await append_event(session_id, "agent.tool_result", {
+                            "tool_use_id": block.tool_use_id or "",
+                            "error": (
+                                f"Tool '{block.tool_name}' is not activated. "
+                                "Call the tool_search tool with relevant "
+                                "keywords first, then retry."
+                            ),
+                        })
+                        continue
+
                 # Evaluate policy
                 evaluator = PolicyEvaluator(agent)
                 permission = evaluator.evaluate(block.tool_name or "")
@@ -1060,9 +1630,42 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
                         "tool_use_id": block.tool_use_id or "",
                         "tool_name": block.tool_name or "",
                     })
+                    # Atlas A2 — externalize the wait: API consumers now see
+                    # idle(requires_action), so the post_events gate matrix
+                    # only admits tool_confirmation/interrupt while the
+                    # in-process LISTEN wait below is unchanged.
+                    await transition(session_id, "idle", stop_reason="requires_action")
+                    await append_event(session_id, "session.status", {
+                        "status": "idle",
+                        "stop_reason": "requires_action",
+                        "tool_use_id": block.tool_use_id or "",
+                        "tool_name": block.tool_name or "",
+                    })
                     # Wait for user.tool_confirmation event
                     confirmation = await wait_for_confirmation(
                         session_id, block.tool_use_id or ""
+                    )
+                    # Resolution received — back to running (Atlas A2).
+                    await transition(session_id, "running")
+                    await append_event(session_id, "session.status", {"status": "running"})
+                    # Atlas B9 — audit the confirmation decision. Low
+                    # frequency (always_ask tools only); one extra load
+                    # for project attribution is fine.
+                    try:
+                        _srow = await load_session(session_id)
+                        _project_id = _srow.get("project_id")
+                    except Exception:
+                        _project_id = None
+                    await record_audit(
+                        "tool.confirmation_decided",
+                        "session",
+                        session_id,
+                        project_id=str(_project_id) if _project_id else None,
+                        detail={
+                            "tool_use_id": block.tool_use_id or "",
+                            "tool_name": block.tool_name or "",
+                            "approved": confirmation.get("result") != "deny",
+                        },
                     )
                     if confirmation.get("result") == "deny":
                         await append_event(session_id, "agent.tool_result", {
@@ -1071,22 +1674,101 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
                                 "deny_message", "Tool call denied by user"
                             ),
                         })
+                        # Atlas B2 — a deny produced by the waiter's
+                        # interrupt sentinel (or a concurrent interrupt)
+                        # must be consumed here: the tool_result above
+                        # masks the interrupt from the loop-top DB check,
+                        # which would leak the flag into the next turn.
+                        if interrupts.is_interrupted(session_id):
+                            await handle_interrupt(session_id)
+                            interrupted = True
+                            break
                         continue
 
-                # Execute the tool (always_allow or confirmed)
-                result, result_event_type = await dispatch_tool(
+                # Atlas B2 — race the dispatch against the in-process
+                # interrupt event. If the interrupt wins, terminate the
+                # sandbox command (builtin tools), reap the dispatch, keep
+                # the tool_use/tool_result pairing intact, and close out.
+                tool_task = asyncio.ensure_future(dispatch_tool(
                     session_id, block, sandbox, agent, vault_ids=vault_ids,
+                ))
+                int_waiter = asyncio.ensure_future(
+                    interrupts.event(session_id).wait()
                 )
+                done, _pending = await asyncio.wait(
+                    {tool_task, int_waiter},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if int_waiter in done:
+                    # Interrupt arrived while the tool was running.
+                    if tool_kind not in ("mcp", "custom_http"):
+                        try:
+                            srow = await load_session(session_id)
+                            cid = srow.get("container_id")
+                            pid = sandbox.active_exec_pid(cid) if cid else None
+                            if pid is not None:
+                                await sandbox.kill_exec(cid, pid)
+                        except Exception:
+                            logger.exception(
+                                "failed to kill sandbox command in session %s",
+                                session_id,
+                            )
+                    # Reap the dispatch. After a kill the exec returns
+                    # quickly; MCP/custom tools have nothing to kill and
+                    # just run to completion. dispatch_tool converts its
+                    # own failures into error-result JSON, so this
+                    # resolves in all cases.
+                    result, result_event_type = await tool_task
+                    if result == "__custom_tool_needs_client__":
+                        result = json.dumps({"error": "Tool call interrupted"})
+                        result_event_type = "agent.tool_result"
+                    await append_event(session_id, result_event_type, {
+                        "tool_use_id": block.tool_use_id or "",
+                        "result": result,
+                    })
+                    interrupts.clear_interrupt(session_id)
+                    await transition(session_id, "idle", stop_reason="end_turn")
+                    await append_event(session_id, "session.status", {
+                        "status": "idle",
+                        "stop_reason": "end_turn",
+                    })
+                    await append_event(session_id, "session.status_idle", {
+                        "stop_reason": "end_turn",
+                    })
+                    interrupted = True
+                    break
+                # Tool won the race — drop the interrupt waiter.
+                int_waiter.cancel()
+                result, result_event_type = tool_task.result()
 
                 if result == "__custom_tool_needs_client__":
                     # Client-handled custom tool: wait for user.custom_tool_result
+                    # Atlas A2 — externalize the wait as idle(requires_action)
+                    # (see the always_ask branch above for the rationale).
+                    await transition(session_id, "idle", stop_reason="requires_action")
+                    await append_event(session_id, "session.status", {
+                        "status": "idle",
+                        "stop_reason": "requires_action",
+                        "tool_use_id": block.tool_use_id or "",
+                        "tool_name": block.tool_name or "",
+                    })
                     custom_result = await wait_for_custom_tool_result(
                         session_id, block.tool_use_id or ""
                     )
+                    # Resolution received — back to running (Atlas A2).
+                    await transition(session_id, "running")
+                    await append_event(session_id, "session.status", {"status": "running"})
                     await append_event(session_id, "agent.tool_result", {
                         "tool_use_id": block.tool_use_id or "",
                         "result": custom_result.get("result", ""),
                     })
+                    # Atlas B2 — same interrupt consumption as the deny
+                    # branch above: the tool_result would otherwise mask
+                    # the interrupt from the loop-top DB check.
+                    if interrupts.is_interrupted(session_id):
+                        await handle_interrupt(session_id)
+                        interrupted = True
+                        break
                 else:
                     await append_event(session_id, result_event_type, {
                         "tool_use_id": block.tool_use_id or "",
@@ -1100,11 +1782,36 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
             # 11. If no tool calls (end_turn), transition to idle and wait
             # for the next user message on the next iteration.
             if stop_reason == "end_turn" or not has_tool_calls:
-                await transition(session_id, "idle")
-                await append_event(session_id, "session.status_idle", {
-                    "stop_reason": stop_reason or "end_turn",
-                })
-                needs_input = True
+                # Atlas B2 — an interrupt landing between the last
+                # tool_result and this close-out would otherwise leak the
+                # flag into the next turn's first stream chunk. The turn
+                # completed; drop it.
+                interrupts.clear_interrupt(session_id)
+
+                # Atlas B6 — safe point: if a user.steer landed mid-turn
+                # (seq > turn_start_seq), don't idle. Continue the loop so
+                # build_context replays the steer as an injected user
+                # message and the model gets another round with it.
+                # Interrupt close-outs (stream_interrupted / race-won
+                # dispatch) deliberately skip this check — interrupt wins.
+                if await has_pending_steer(session_id, turn_start_seq):
+                    logger.info(
+                        "Session %s steered mid-turn; continuing without idling.",
+                        session_id,
+                    )
+                    needs_input = False
+                else:
+                    await transition(session_id, "idle", stop_reason=stop_reason or "end_turn")
+                    # Atlas A2 — unified status event; session.status_idle kept
+                    # one transition period for existing consumers.
+                    await append_event(session_id, "session.status", {
+                        "status": "idle",
+                        "stop_reason": stop_reason or "end_turn",
+                    })
+                    await append_event(session_id, "session.status_idle", {
+                        "stop_reason": stop_reason or "end_turn",
+                    })
+                    needs_input = True
             else:
                 # Tool calls were dispatched (some or all of which may have
                 # returned errors). The model needs to see the tool_results
@@ -1114,13 +1821,64 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
                 # writer).
                 needs_input = False
 
+        except RetryableError as exc:
+            # Atlas A2 — retryable provider failures (429/5xx/network) park
+            # the session in 'error' with exponential backoff, then re-enter
+            # the loop. After MAX_RETRIES the session lands in idle with
+            # stop_reason='retries_exhausted' — per PRD §4.1 it stays
+            # resumable by the caller (post_events admits user.message on
+            # it) rather than becoming terminal.
+            retry_count = int(session.get("retry_count") or 0)
+            if retry_count >= MAX_RETRIES:
+                logger.error("Retries exhausted for session %s: %s", session_id, exc)
+                await execute(
+                    "UPDATE sessions SET retry_count = 0 WHERE id = $1",
+                    uuid.UUID(session_id),
+                )
+                await append_event(session_id, "session.error", {
+                    "error": str(exc),
+                    "source": "model_provider",
+                    "retries_exhausted": True,
+                })
+                await transition(session_id, "idle", stop_reason="retries_exhausted")
+                await append_event(session_id, "session.status", {
+                    "status": "idle",
+                    "stop_reason": "retries_exhausted",
+                })
+                needs_input = True
+            else:
+                attempts = retry_count + 1
+                backoff = min(60.0, 5.0 * (2 ** retry_count))
+                await execute(
+                    "UPDATE sessions SET retry_count = $2 WHERE id = $1",
+                    uuid.UUID(session_id),
+                    attempts,
+                )
+                await transition(session_id, "error", stop_reason="retrying")
+                await append_event(session_id, "session.status", {
+                    "status": "error",
+                    "stop_reason": "retrying",
+                    "retry_count": attempts,
+                    "next_retry_in_ms": int(backoff * 1000),
+                    "error": str(exc),
+                })
+                logger.info(
+                    "Session %s retryable error (attempt %d/%d), retrying in %.0fs: %s",
+                    session_id, attempts, MAX_RETRIES + 1, backoff, exc,
+                )
+                await asyncio.sleep(backoff)
+                # Re-enter the model loop immediately — the request we're
+                # retrying hasn't produced anything the model needs to see.
+                needs_input = False
+
         except ProviderError as exc:
             logger.error("Provider error in session %s: %s", session_id, exc)
             await append_event(session_id, "session.error", {
                 "error": str(exc),
                 "source": "model_provider",
             })
-            await transition(session_id, "failed")
+            await transition(session_id, "failed", stop_reason="provider_error")
+            tracing.end_session_tracing(session_id)
             return
 
         except Exception as exc:
@@ -1130,9 +1888,10 @@ async def run_session(session_id: str, sandbox: DockerSandbox) -> None:
                     "error": str(exc),
                     "source": "orchestrator",
                 })
-                await transition(session_id, "failed")
+                await transition(session_id, "failed", stop_reason="internal_error")
             except Exception:
                 logger.exception("Failed to record error for session %s", session_id)
+            tracing.end_session_tracing(session_id)
             return
 
 
@@ -1147,15 +1906,19 @@ async def recover_sessions(
     *,
     watcher_tasks: dict[str, Any] | None = None,
     spawn_watcher: Callable[[str], Awaitable[None]] | None = None,
+    sandbox_resolver: Callable[[Any], Awaitable[Any]] | None = None,
 ) -> None:
     """Recover non-terminal sessions after process restart.
 
-    1. Query for sessions with status in (running, idle, rescheduling).
+    1. Query for sessions with status in (running, idle, rescheduling,
+       provisioning, error) — Atlas A2 adds the two retryable states.
     2. Set each to ``rescheduling``, emit ``session.status_rescheduled``.
     3. Check if the container still exists.
-    4. If container alive → transition to ``idle``, start orchestrator task,
-       and (PR5 D4) re-spawn the deliverables watcher so its boot scan
-       ingests anything written during the outage.
+    4. If container alive → transition to ``idle`` (keeping the row's
+       stop_reason so an interrupted requires_action wait still gates
+       post_events correctly), start orchestrator task, and (PR5 D4)
+       re-spawn the deliverables watcher so its boot scan ingests
+       anything written during the outage.
     5. If container missing → transition to ``failed``, emit ``session.error``.
 
     ``spawn_watcher`` is passed in (not imported) to avoid a circular
@@ -1163,10 +1926,28 @@ async def recover_sessions(
     to ``watch_session_deliverables``. When omitted (legacy callers, unit
     tests), watcher re-spawn is skipped without erroring.
 
+    ``sandbox_resolver`` (Atlas M4, FR-4.6) resolves the sandbox per row so
+    sessions pinned to a remote executor node rebuild their HTTP sandbox
+    instead of reusing the process-wide one. When omitted, every row uses
+    the passed-in ``sandbox``. Resolution failures (node unreachable,
+    capacity/decryption issues) mark the session failed rather than
+    blocking recovery of the remaining rows.
+
     Requirements: 23.1, 23.2, 23.3, 23.4, 6.8
     """
+    # Atlas C2 — lease-aware scan: skip sessions whose lease is held by a
+    # live replica (fresh heartbeat) — that replica is already driving
+    # them. Rows with a stale or missing heartbeat belong to a dead or
+    # pre-C2 replica and still need recovery. Tests patch fetch_all, so
+    # the added parameters are transparent to them.
     rows = await fetch_all(
-        "SELECT * FROM sessions WHERE status IN ('running', 'idle', 'rescheduling')"
+        "SELECT * FROM sessions WHERE status IN "
+        "('running', 'idle', 'rescheduling', 'provisioning', 'error') "
+        "AND (orchestrator_instance IS NULL OR orchestrator_instance = $1 "
+        "OR orchestrator_heartbeat IS NULL "
+        "OR orchestrator_heartbeat < now() - make_interval(secs => $2))",
+        get_instance_id(),
+        LEASE_TIMEOUT_SEC,
     )
 
     for row in rows:
@@ -1180,13 +1961,35 @@ async def recover_sessions(
                 "reason": "process_restart",
             })
 
+            # Atlas M4 (FR-4.6) — resolve the sandbox per row. Sessions
+            # pinned to a remote executor node rebuild their HTTP sandbox
+            # here; an unreachable node fails just that session and the
+            # rest of the scan continues.
+            row_sandbox: Any = sandbox
+            if sandbox_resolver is not None:
+                try:
+                    row_sandbox = await sandbox_resolver(row)
+                except SandboxError as exc:
+                    await transition(
+                        session_id, "failed", stop_reason="sandbox_unavailable"
+                    )
+                    await append_event(session_id, "session.error", {
+                        "error": str(exc),
+                        "source": "recovery",
+                    })
+                    continue
+
             # Check if container still exists
             if container_id:
                 try:
-                    await sandbox.exec(container_id, "true")
-                    # Container is alive — transition to idle and start orchestrator
-                    await transition(session_id, "idle")
-                    task = asyncio.create_task(run_session(session_id, sandbox))
+                    await row_sandbox.exec(container_id, "true")
+                    # Container is alive — transition to idle and start orchestrator.
+                    # Keep the row's stop_reason so a requires_action wait that
+                    # was in flight during the restart still gates post_events.
+                    await transition(
+                        session_id, "idle", stop_reason=row.get("stop_reason")
+                    )
+                    task = asyncio.create_task(run_session(session_id, row_sandbox))
                     orchestrator_tasks[session_id] = task
 
                     # PR5 D4 — re-attach the deliverables watcher. Its boot
@@ -1208,14 +2011,14 @@ async def recover_sessions(
                         watcher_tasks[session_id] = watcher_task
                 except Exception:
                     # Container is gone
-                    await transition(session_id, "failed")
+                    await transition(session_id, "failed", stop_reason="container_lost")
                     await append_event(session_id, "session.error", {
                         "error": "Container not found after process restart",
                         "source": "recovery",
                     })
             else:
                 # No container_id at all
-                await transition(session_id, "failed")
+                await transition(session_id, "failed", stop_reason="container_lost")
                 await append_event(session_id, "session.error", {
                     "error": "Container not found after process restart",
                     "source": "recovery",
@@ -1224,13 +2027,168 @@ async def recover_sessions(
         except Exception:
             logger.exception("Failed to recover session %s", session_id)
             try:
-                await transition(session_id, "failed")
+                await transition(session_id, "failed", stop_reason="recovery_failed")
                 await append_event(session_id, "session.error", {
                     "error": "Recovery failed due to unexpected error",
                     "source": "recovery",
                 })
             except Exception:
                 logger.exception("Failed to mark session %s as failed", session_id)
+
+
+# ---------------------------------------------------------------------------
+# Atlas C2 — lease supervisor: reclaim sessions whose owner died
+# ---------------------------------------------------------------------------
+
+
+def supervisor_enabled() -> bool:
+    """Lease supervisor runs unless explicitly disabled.
+
+    ``LINCHPIN_LEASE_SUPERVISOR=false`` skips it (tests, or single-process
+    deployments that don't want takeover passes).
+    """
+    return os.environ.get("LINCHPIN_LEASE_SUPERVISOR", "true").lower() != "false"
+
+
+async def take_over_stale_sessions(
+    sandbox: DockerSandbox,
+    orchestrator_tasks: dict[str, Any],
+    *,
+    watcher_tasks: dict[str, Any] | None = None,
+    spawn_watcher: Callable[[str], Awaitable[None]] | None = None,
+    stale_after: float | None = None,
+    sandbox_resolver: Callable[[Any], Awaitable[Any]] | None = None,
+) -> int:
+    """Take over sessions whose lease heartbeat has gone stale (Atlas C2).
+
+    A session is a takeover candidate when its status is running/idle and
+    ``orchestrator_heartbeat`` is older than ``stale_after`` seconds — its
+    owning replica stopped renewing (crash, network partition). For each
+    candidate:
+
+    1. Try the advisory-lock lease (fails closed when another replica
+       raced us to it, or the old owner is somehow still alive).
+    2. Check the container; dead → ``failed(container_lost)`` + release.
+    3. Alive → transition to ``idle`` (keeping stop_reason), emit
+       ``session.takeover``, start an orchestrator task that reuses the
+       already-held lease, re-spawn the deliverables watcher.
+
+    Deliberately no notify is emitted for the taken-over session: a
+    mid-turn owner death is not auto-replayed, matching the pre-existing
+    process-restart semantics in :func:`recover_sessions` (turn replay is
+    a durable-execution concern — plan §8, M4 evaluation).
+
+    Returns the number of sessions taken over.
+    """
+    if stale_after is None:
+        stale_after = LEASE_TIMEOUT_SEC
+    rows = await fetch_all(
+        "SELECT * FROM sessions WHERE status IN ('running', 'idle') "
+        "AND orchestrator_heartbeat < now() - make_interval(secs => $1)",
+        stale_after,
+    )
+    taken = 0
+    for row in rows:
+        session_id = str(row["id"])
+
+        # Skip sessions this process is already driving — their heartbeat
+        # is renewed by our own heartbeat task; a stale row while our task
+        # is alive means renewal writes are failing, which the loop's
+        # broken-lease check handles.
+        task = orchestrator_tasks.get(session_id)
+        if task is not None and not task.done():
+            continue
+
+        try:
+            lease = SessionLease(session_id)
+            acquired = await lease.acquire()
+        except Exception:
+            logger.info(
+                "Takeover lease unavailable for session %s; skipping", session_id,
+            )
+            continue
+        if not acquired:
+            continue  # another replica won the race
+
+        # Atlas M4 (FR-4.6) — resolve the sandbox per row so takeover works
+        # for remote executor sessions too; the process-wide sandbox can't
+        # probe containers that live on a remote node's Docker host.
+        row_sandbox: Any = sandbox
+        if sandbox_resolver is not None:
+            try:
+                row_sandbox = await sandbox_resolver(row)
+            except SandboxError as exc:
+                await lease.release()
+                await transition(session_id, "failed", stop_reason="sandbox_unavailable")
+                await append_event(session_id, "session.error", {
+                    "error": str(exc),
+                    "source": "lease_supervisor",
+                })
+                continue
+
+        try:
+            container_id = row.get("container_id")
+            alive = False
+            if container_id:
+                try:
+                    await row_sandbox.exec(container_id, "true")
+                    alive = True
+                except Exception:
+                    alive = False
+            if not alive:
+                await lease.release()
+                await transition(session_id, "failed", stop_reason="container_lost")
+                await append_event(session_id, "session.error", {
+                    "error": "Container not found during lease takeover",
+                    "source": "lease_supervisor",
+                })
+                continue
+
+            # Container alive — resume the loop as the new lease holder.
+            # Keep the row's stop_reason so a requires_action wait that was
+            # in flight on the dead replica still gates post_events.
+            await transition(session_id, "idle", stop_reason=row.get("stop_reason"))
+            await append_event(session_id, "session.takeover", {
+                "previous_instance": row.get("orchestrator_instance"),
+                "new_instance": get_instance_id(),
+            })
+            new_task = asyncio.create_task(
+                run_session(session_id, row_sandbox, lease=lease)
+            )
+            orchestrator_tasks[session_id] = new_task
+            taken += 1
+
+            if spawn_watcher is not None and watcher_tasks is not None:
+                watcher_task = asyncio.create_task(spawn_watcher(session_id))
+                watcher_tasks[session_id] = watcher_task
+        except Exception:
+            logger.exception("Failed to take over session %s", session_id)
+            await lease.release()
+    return taken
+
+
+async def supervise_stale_sessions(
+    sandbox: DockerSandbox,
+    orchestrator_tasks: dict[str, Any],
+    *,
+    watcher_tasks: dict[str, Any] | None = None,
+    spawn_watcher: Callable[[str], Awaitable[None]] | None = None,
+    interval_seconds: float = 30.0,
+    sandbox_resolver: Callable[[Any], Awaitable[Any]] | None = None,
+) -> None:
+    """Background loop reclaiming abandoned sessions every pass (Atlas C2)."""
+    while True:
+        try:
+            await take_over_stale_sessions(
+                sandbox,
+                orchestrator_tasks,
+                watcher_tasks=watcher_tasks,
+                spawn_watcher=spawn_watcher,
+                sandbox_resolver=sandbox_resolver,
+            )
+        except Exception:
+            logger.exception("Lease supervisor pass failed")
+        await asyncio.sleep(interval_seconds)
 
 
 # ---------------------------------------------------------------------------
@@ -1242,6 +2200,7 @@ async def cleanup_expired_sessions(
     sandbox: DockerSandbox,
     orchestrator_tasks: dict[str, Any],
     interval_seconds: int = 60,
+    sandbox_resolver: Callable[[Any], Awaitable[Any]] | None = None,
 ) -> None:
     """Background task that periodically checks for and terminates expired sessions.
 
@@ -1264,7 +2223,7 @@ async def cleanup_expired_sessions(
 
             rows = await fetch_all(
                 """
-                SELECT id, container_id
+                SELECT id, container_id, metadata
                 FROM sessions
                 WHERE ttl_seconds IS NOT NULL
                   AND status NOT IN ('terminated', 'failed')
@@ -1301,7 +2260,13 @@ async def cleanup_expired_sessions(
 
                     # Destroy container
                     if container_id:
-                        await sandbox.destroy(container_id)
+                        # Atlas M4 (FR-4.6) — resolve per row so TTL expiry
+                        # destroys remote executor containers on their node
+                        # instead of silently no-oping against local Docker.
+                        row_sandbox = sandbox
+                        if sandbox_resolver is not None:
+                            row_sandbox = await sandbox_resolver(row)
+                        await row_sandbox.destroy(container_id)
 
                 except Exception:
                     logger.exception("Error terminating expired session %s", session_id)

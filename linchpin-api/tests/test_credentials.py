@@ -44,7 +44,7 @@ async def test_resolve_api_key_found(mock_fetch):
     """Returns decrypted api_key from first matching vault."""
     vault_id = str(uuid.uuid4())
     encrypted = _encrypt(json.dumps({"api_key": "sk-test-123"}))
-    mock_fetch.return_value = {"encrypted_secrets": encrypted}
+    mock_fetch.return_value = {"id": str(uuid.uuid4()), "encrypted_secrets": encrypted}
 
     resolver = CredentialResolver()
     result = await resolver.resolve_api_key([vault_id], "openrouter")
@@ -74,7 +74,7 @@ async def test_resolve_api_key_vault_ordering(mock_fetch):
     encrypted = _encrypt(json.dumps({"api_key": "from-vault-2"}))
 
     # First vault has no match, second vault has a match
-    mock_fetch.side_effect = [None, {"encrypted_secrets": encrypted}]
+    mock_fetch.side_effect = [None, {"id": str(uuid.uuid4()), "encrypted_secrets": encrypted}]
 
     resolver = CredentialResolver()
     result = await resolver.resolve_api_key([vault_1, vault_2], "openrouter")
@@ -113,6 +113,7 @@ async def test_resolve_mcp_credential_bearer_token(mock_fetch):
     vault_id = str(uuid.uuid4())
     encrypted = _encrypt(json.dumps({"token": "mcp-bearer-abc"}))
     mock_fetch.return_value = {
+        "id": str(uuid.uuid4()),
         "credential_type": "bearer_token",
         "encrypted_secrets": encrypted,
     }
@@ -130,6 +131,7 @@ async def test_resolve_mcp_credential_oauth(mock_fetch):
     vault_id = str(uuid.uuid4())
     encrypted = _encrypt(json.dumps({"access_token": "oauth-token-xyz"}))
     mock_fetch.return_value = {
+        "id": str(uuid.uuid4()),
         "credential_type": "oauth",
         "encrypted_secrets": encrypted,
     }
@@ -177,7 +179,7 @@ async def test_resolve_mcp_credential_vault_ordering(mock_fetch):
 
     mock_fetch.side_effect = [
         None,
-        {"credential_type": "bearer_token", "encrypted_secrets": encrypted},
+        {"id": str(uuid.uuid4()), "credential_type": "bearer_token", "encrypted_secrets": encrypted},
     ]
 
     resolver = CredentialResolver()

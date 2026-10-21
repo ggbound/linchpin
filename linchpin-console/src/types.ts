@@ -277,3 +277,26 @@ export interface UpdateCredentialRequest {
   refresh_token?: string;
   client_secret?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Usage
+// ---------------------------------------------------------------------------
+
+/** One usage bucket: a UTC day, a project, or the overall total. */
+export interface UsageBucket {
+  bucket: string;
+  sessions: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+}
+
+/** GET /v1/usage response. */
+export interface UsageResponse {
+  group_by: "day" | "project";
+  from?: string | null;
+  to?: string | null;
+  total: UsageBucket;
+  buckets: UsageBucket[];
+}

@@ -16,9 +16,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+from app.audit import record_audit
+from app.auth import AuthContext, require_auth
 from app.db import execute, fetch_all, fetch_one
 from app.files import LocalFileStore
 from app.memory import memory_retention_days, memory_store_root
@@ -61,10 +63,12 @@ def _parse_uuid(value: str, *, kind: str) -> uuid.UUID:
         )
 
 
-async def _ensure_store_exists(uid: uuid.UUID) -> None:
+async def _ensure_store_exists(uid: uuid.UUID, project_uid: uuid.UUID) -> None:
     row = await fetch_one(
-        "SELECT id FROM memory_stores WHERE id = $1 AND archived_at IS NULL",
+        "SELECT id FROM memory_stores WHERE id = $1 AND archived_at IS NULL"
+        " AND workspace_id = $2",
         uid,
+        project_uid,
     )
     if row is None:
         raise HTTPException(
@@ -81,12 +85,13 @@ async def list_memory_versions(
     store_id: str,
     memory_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
+    ctx: AuthContext = Depends(require_auth),
 ) -> PaginatedListResponse:
     """List versions in this store. Optionally filter to one memory's
     chain via ``?memory_id=<id>`` — typical usage when an operator is
     reconstructing the history of a single path."""
     store_uid = _parse_uuid(store_id, kind="Memory store")
-    await _ensure_store_exists(store_uid)
+    await _ensure_store_exists(store_uid, uuid.UUID(ctx.project_id))
 
     if memory_id is not None:
         memory_uid = _parse_uuid(memory_id, kind="Memory")
@@ -119,10 +124,14 @@ async def list_memory_versions(
 
 
 @router.get("/{version_id}", response_model=MemoryVersion)
-async def get_memory_version(store_id: str, version_id: str) -> MemoryVersion:
+async def get_memory_version(
+    store_id: str,
+    version_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> MemoryVersion:
     store_uid = _parse_uuid(store_id, kind="Memory store")
     ver_uid = _parse_uuid(version_id, kind="Memory version")
-    await _ensure_store_exists(store_uid)
+    await _ensure_store_exists(store_uid, uuid.UUID(ctx.project_id))
     row = await fetch_one(
         "SELECT * FROM memory_versions WHERE memory_store_id = $1 AND id = $2",
         store_uid,
@@ -140,7 +149,11 @@ async def get_memory_version(store_id: str, version_id: str) -> MemoryVersion:
 
 
 @router.get("/{version_id}/content")
-async def get_memory_version_content(store_id: str, version_id: str):
+async def get_memory_version_content(
+    store_id: str,
+    version_id: str,
+    ctx: AuthContext = Depends(require_auth),
+):
     """Stream the raw bytes for this version. Returns 404 once the row
     is redacted (``redacted_at IS NOT NULL``). Delete and create-empty
     versions (zero-byte ``action='delete'`` rows) return an empty body
@@ -149,7 +162,7 @@ async def get_memory_version_content(store_id: str, version_id: str):
     """
     store_uid = _parse_uuid(store_id, kind="Memory store")
     ver_uid = _parse_uuid(version_id, kind="Memory version")
-    await _ensure_store_exists(store_uid)
+    await _ensure_store_exists(store_uid, uuid.UUID(ctx.project_id))
     row = await fetch_one(
         "SELECT * FROM memory_versions WHERE memory_store_id = $1 AND id = $2",
         store_uid,
@@ -183,7 +196,10 @@ async def get_memory_version_content(store_id: str, version_id: str):
 
 @router.post("/{version_id}/redact", response_model=MemoryVersion)
 async def redact_memory_version(
-    store_id: str, version_id: str, body: RedactRequest
+    store_id: str,
+    version_id: str,
+    body: RedactRequest,
+    ctx: AuthContext = Depends(require_auth),
 ) -> MemoryVersion:
     """Tombstone a specific version: unlink its bytes from the FileStore,
     zero its ``content_sha256``, and set ``redacted_at``. If the version
@@ -193,7 +209,7 @@ async def redact_memory_version(
     """
     store_uid = _parse_uuid(store_id, kind="Memory store")
     ver_uid = _parse_uuid(version_id, kind="Memory version")
-    await _ensure_store_exists(store_uid)
+    await _ensure_store_exists(store_uid, uuid.UUID(ctx.project_id))
 
     row = await fetch_one(
         "SELECT * FROM memory_versions WHERE memory_store_id = $1 AND id = $2",
@@ -266,5 +282,10 @@ async def redact_memory_version(
             now,
             expires_at,
         )
+
+    await record_audit(
+        "memory_version.redacted", "memory_version", version_id, ctx=ctx,
+        detail={"store_id": store_id, "memory_id": str(row["memory_id"]), "reason": body.reason},
+    )
 
     return _row_to_version(redacted)

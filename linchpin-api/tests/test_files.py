@@ -209,7 +209,7 @@ def test_upload_file_returns_413_when_too_large(mock_get_store, client):
 
     assert resp.status_code == 413
     body = resp.json()
-    assert body["detail"]["error"] == "file_too_large"
+    assert body["error"] == "file_too_large"
     assert body["detail"]["limit_bytes"] == 500
 
 
@@ -245,10 +245,12 @@ def test_list_files_scope_filter_is_exact(mock_fetch_all, client):
     assert body["data"][0]["scope_id"] == scope
     assert body["data"][0]["source"] == "deliverable"
     # Confirm the query filters exactly (no prefix match) and binds the scope UUID.
+    # Atlas C1: project_id is bound first ($1), scope_id second ($2).
     sql_called = mock_fetch_all.await_args.args[0]
-    bound_scope = mock_fetch_all.await_args.args[1]
-    assert "scope_id = $1" in sql_called
+    bound_scope = mock_fetch_all.await_args.args[2]
+    assert "scope_id = $2" in sql_called
     assert "scope_type = 'session'" in sql_called
+    assert "project_id = $1" in sql_called
     assert str(bound_scope) == scope
 
 
@@ -311,7 +313,7 @@ def test_get_file_content_returns_403_for_upload(mock_fetch, mock_get_store, fak
     resp = client.get(f"/v1/files/{uuid.uuid4()}/content", headers=AUTH)
 
     assert resp.status_code == 403
-    assert resp.json()["detail"]["error"] == "not_downloadable"
+    assert resp.json()["error"] == "not_downloadable"
     # Store must NOT have been consulted once the gate rejects.
     fake_store.read.assert_not_called()
 
@@ -404,8 +406,9 @@ def test_delete_file_returns_409_when_mounted(mock_fetch, mock_execute, client):
     resp = client.delete(f"/v1/files/{uuid.uuid4()}", headers=AUTH)
 
     assert resp.status_code == 409
-    detail = resp.json()["detail"]
-    assert detail["error"] == "file_in_use"
+    body = resp.json()
+    assert body["error"] == "file_in_use"
+    detail = body["detail"]
     assert detail["session_id"] == str(mounted_row["session_id"])
     assert detail["mount_path"] == "/mnt/data/active.csv"
     # No DELETE issued — file row + bytes preserved.

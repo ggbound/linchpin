@@ -13,7 +13,8 @@ import re
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Discriminator, Field, Tag, field_validator
+from cryptography.fernet import Fernet
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -23,6 +24,7 @@ from pydantic import BaseModel, Discriminator, Field, Tag, field_validator
 EVENT_TYPES: frozenset[str] = frozenset({
     # User events
     "user.message",
+    "user.steer",  # Atlas A4 — gated to running (steer injection lands in B6)
     "user.interrupt",
     "user.tool_confirmation",
     "user.custom_tool_result",
@@ -42,11 +44,13 @@ EVENT_TYPES: frozenset[str] = frozenset({
     "session.status_idle",
     "session.status_rescheduled",
     "session.status_terminated",
+    "session.status",                 # Atlas A2 — unified status transition event
     "session.error",
     "session.requires_action",
     "session.resource_mount_failed",  # PR3 — D5
     "session.memory_mount_failed",    # v0.3 PR4 — per-store memory mount failure
     "session.deprecation_used",       # v0.3 PR6 — request used a deprecated shape
+    "session.compacted",              # Atlas B1 — compaction summary (server-emitted only)
     # Memory events — v0.3
     "memory.write",                   # v0.3 PR4 — API or sandbox memory write
     "memory.write_rejected",          # v0.3 PR4 — sandbox over-cap rollback
@@ -67,6 +71,7 @@ EVENT_TYPES: frozenset[str] = frozenset({
 
 EventType = Literal[
     "user.message",
+    "user.steer",
     "user.interrupt",
     "user.tool_confirmation",
     "user.custom_tool_result",
@@ -84,11 +89,13 @@ EventType = Literal[
     "session.status_idle",
     "session.status_rescheduled",
     "session.status_terminated",
+    "session.status",
     "session.error",
     "session.requires_action",
     "session.resource_mount_failed",
     "session.memory_mount_failed",
     "session.deprecation_used",
+    "session.compacted",  # Atlas B1 — compaction summary (server-emitted only)
     "memory.write",
     "memory.write_rejected",
     "memory.gc",
@@ -118,6 +125,9 @@ class ModelConfig(BaseModel):
     provider: Literal["openrouter", "ollama"]
     id: str
     base_url: str | None = None  # Override default endpoint for openrouter or ollama
+    # Atlas B1 — optional per-model context window override used by context
+    # compaction; unset falls back to LINCHPIN_CONTEXT_WINDOW env, then 128k.
+    context_window: int | None = None
 
 
 # v0.2.0 breaking bundle — `permission_policy` widens from a flat
@@ -286,6 +296,59 @@ def normalize_mcp_servers(values: list[object]) -> list[object]:
 # ---------------------------------------------------------------------------
 
 MAX_SKILLS_PER_AGENT = 8  # v0.4.0 — mirrors Anthropic's max-8 cap.
+MAX_SUBAGENTS_PER_AGENT = 16  # FR-6.1 — declared-worker cap per agent.
+
+# FR-6.1 — subagent handles are tool-call identifiers, not display names:
+# lowercase, no spaces, bounded length.
+_SUBAGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+
+
+class SubagentConfig(BaseModel):
+    """FR-6.1 — one declared worker an agent may spawn via ``spawn_subagent``.
+
+    Declaration is the enablement gate: the orchestrator only exposes the
+    ``spawn_subagent`` tool when ``multi_agents`` is non-empty, the policy
+    layer fixes it at ``always_ask``, and the handler refuses any name not
+    declared here (fail closed).
+
+    ``environment_id`` unset inherits the parent session's environment at
+    spawn time; ``agent_id`` must reference a live agent in the same
+    project (enforced at the routes layer, mirroring skills validation).
+    """
+
+    name: str
+    agent_id: str
+    environment_id: str | None = None
+    description: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def _enforce_name_format(cls, v: str) -> str:
+        if not _SUBAGENT_NAME_RE.match(v):
+            raise ValueError(
+                f"subagent name must match ^[a-z][a-z0-9_-]{{0,63}}$ (got {v!r})"
+            )
+        return v
+
+
+def _validate_subagent_list(
+    values: list[SubagentConfig] | None,
+) -> list[SubagentConfig] | None:
+    """Shared list-level checks for every ``multi_agents`` field: cap +
+    unique declared names (each name becomes an enum entry on the
+    ``spawn_subagent`` tool, so duplicates are a config bug, not a feature)."""
+    if values is None:
+        return None
+    if len(values) > MAX_SUBAGENTS_PER_AGENT:
+        raise ValueError(
+            f"agent.multi_agents exceeds {MAX_SUBAGENTS_PER_AGENT}-per-agent cap "
+            f"(got {len(values)})"
+        )
+    names = [s.name for s in values]
+    if len(set(names)) != len(names):
+        dup = sorted({n for n in names if names.count(n) > 1})
+        raise ValueError(f"agent.multi_agents contains duplicate names: {dup}")
+    return values
 
 
 class Agent(BaseModel):
@@ -299,6 +362,7 @@ class Agent(BaseModel):
     tools: list[ToolConfig] = Field(default_factory=list)
     mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)         # v0.4.0
+    multi_agents: list[SubagentConfig] = Field(default_factory=list)  # FR-6.1
     created_at: datetime
     description: str | None = None                          # v0.2.0 item #5
     metadata: dict[str, Any] = Field(default_factory=dict)  # v0.2.0 item #5
@@ -310,6 +374,11 @@ class Agent(BaseModel):
         # v0.5.0 — DB rows from v0.4 lack the ``type`` discriminator;
         # default to ``stdio`` so they keep validating.
         return normalize_mcp_servers(v) if v is not None else v
+
+    @field_validator("multi_agents")
+    @classmethod
+    def _enforce_subagent_list(cls, v):
+        return _validate_subagent_list(v)
 
 
 class AgentVersion(BaseModel):
@@ -331,12 +400,18 @@ class AgentVersion(BaseModel):
     tools: list[ToolConfig] = Field(default_factory=list)
     mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)         # v0.4.0
+    multi_agents: list[SubagentConfig] = Field(default_factory=list)  # FR-6.1
     snapshotted_at: datetime
 
     @field_validator("mcp_servers", mode="before")
     @classmethod
     def _normalize_mcp_servers(cls, v):  # noqa: D401
         return normalize_mcp_servers(v) if v is not None else v
+
+    @field_validator("multi_agents")
+    @classmethod
+    def _enforce_subagent_list(cls, v):
+        return _validate_subagent_list(v)
 
 
 # ---------------------------------------------------------------------------
@@ -519,11 +594,49 @@ def derived_image_tag(
     return f"{repo}:{packages.content_hash()[:12]}"
 
 
+class SandboxResources(BaseModel):
+    """Atlas B3 — sandbox spec tier for the session sandbox (FR-4.5).
+
+    The tier name is the user-facing knob; concrete Docker limits are
+    resolved at container-create time (``RESOURCE_TIERS`` in app/sandbox.py).
+    """
+
+    tier: Literal["1c2g", "2c4g", "4c8g"] = "1c2g"
+
+
+class ToolSearchConfig(BaseModel):
+    """Atlas M4 (FR-5.6) — deferred tool loading for large tool catalogs.
+
+    When ``enabled`` and the assembled tool count exceeds ``threshold``,
+    the orchestrator exposes only the ``tool_search`` meta-tool plus any
+    tools activated by earlier searches in the current session run.
+    """
+
+    enabled: bool = False
+    # Total tool count above which search mode kicks in.
+    threshold: int = Field(default=20, ge=1)
+    # Maximum number of tools returned per search call.
+    max_results: int = Field(default=10, ge=1, le=50)
+
+
 class EnvironmentConfig(BaseModel):
     """Environment configuration wrapper."""
 
     networking: NetworkingConfig
     packages: EnvironmentPackages = Field(default_factory=EnvironmentPackages)  # v0.2.0 item #3
+    resources: SandboxResources = Field(default_factory=SandboxResources)  # Atlas B3
+    # Atlas C3 (FR-4.1) — sandbox isolation level. "docker" is the M1-M3
+    # default (cgroups + network isolation); "microvm" routes the session
+    # to a Firecracker/E2B microVM runtime when the deployment enables one
+    # (LINCHPIN_ENABLE_MICROVM). JSONB field — no migration needed.
+    isolation: Literal["docker", "microvm"] = "docker"
+    # Atlas M4 (FR-5.6) — deferred tool loading. None/absent keeps the
+    # legacy always-expose-everything behavior. JSONB — no migration.
+    tool_search: ToolSearchConfig | None = None
+    # Atlas M4 (FR-4.6) — BYO executor. Name of a registered executor node
+    # (``executor_nodes`` table) that runs the session sandbox on customer
+    # infrastructure. None = run locally (docker/microvm per ``isolation``).
+    executor_node: str | None = None
 
 
 class Environment(BaseModel):
@@ -540,7 +653,14 @@ class Environment(BaseModel):
 # Session
 # ---------------------------------------------------------------------------
 
-SessionStatus = Literal["rescheduling", "running", "idle", "terminated", "failed"]
+# Atlas A2 — 'provisioning' covers POST /sessions while the sandbox image +
+# container are being created; 'error' is the retryable-failure state
+# (orchestrator backs off and retries up to 3 times before landing in
+# idle with stop_reason='retries_exhausted').
+SessionStatus = Literal[
+    "provisioning", "rescheduling", "running", "idle",
+    "error", "terminated", "failed",
+]
 
 
 class SessionStats(BaseModel):
@@ -574,6 +694,8 @@ class Session(BaseModel):
     agent_version: int
     environment_id: str
     status: SessionStatus = "running"
+    stop_reason: str | None = None          # Atlas A2 — end_turn/requires_action/retries_exhausted/...
+    retry_count: int = 0                    # Atlas A2 — automatic retry attempts in the error state
     container_id: str | None = None
     title: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -601,6 +723,9 @@ class Event(BaseModel):
     type: EventType
     payload: dict[str, Any] = Field(default_factory=dict)
     processed_at: datetime | None = None
+    # Atlas A3 (0017) — globally unique identity ('sevt_...' from the DB
+    # default). Optional until the migration has run.
+    event_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -616,6 +741,7 @@ class CreateAgentRequest(BaseModel):
     tools: list[ToolConfig] = Field(default_factory=list)
     mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)         # v0.4.0
+    multi_agents: list[SubagentConfig] = Field(default_factory=list)  # FR-6.1
     description: str | None = None                          # v0.2.0 item #5
     metadata: dict[str, Any] = Field(default_factory=dict)  # v0.2.0 item #5
 
@@ -648,6 +774,11 @@ class CreateAgentRequest(BaseModel):
             raise ValueError("agent.skills contains duplicate skill ids")
         return v
 
+    @field_validator("multi_agents")
+    @classmethod
+    def _enforce_subagent_list(cls, v):
+        return _validate_subagent_list(v)
+
 
 class UpdateAgentRequest(BaseModel):
     """PATCH /v1/agents/{id} request body — all fields optional."""
@@ -658,6 +789,7 @@ class UpdateAgentRequest(BaseModel):
     tools: list[ToolConfig] | None = None
     mcp_servers: list[MCPServerConfig] | None = None
     skills: list[str] | None = None                         # v0.4.0
+    multi_agents: list[SubagentConfig] | None = None        # FR-6.1
     description: str | None = None                          # v0.2.0 item #5
     metadata: dict[str, Any] | None = None                  # v0.2.0 item #5
 
@@ -689,6 +821,11 @@ class UpdateAgentRequest(BaseModel):
         if len(set(v)) != len(v):
             raise ValueError("agent.skills contains duplicate skill ids")
         return v
+
+    @field_validator("multi_agents")
+    @classmethod
+    def _enforce_subagent_list(cls, v):
+        return _validate_subagent_list(v)
 
 
 class CreateEnvironmentRequest(BaseModel):
@@ -912,6 +1049,7 @@ class AgentResponse(BaseModel):
     tools: list[ToolConfig] = Field(default_factory=list)
     mcp_servers: list[MCPServerConfig] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)         # v0.4.0
+    multi_agents: list[SubagentConfig] = Field(default_factory=list)  # FR-6.1
     created_at: datetime
     description: str | None = None                          # v0.2.0 item #5
     metadata: dict[str, Any] = Field(default_factory=dict)  # v0.2.0 item #5
@@ -921,6 +1059,11 @@ class AgentResponse(BaseModel):
     @classmethod
     def _normalize_mcp_servers(cls, v):  # noqa: D401
         return normalize_mcp_servers(v) if v is not None else v
+
+    @field_validator("multi_agents")
+    @classmethod
+    def _enforce_subagent_list(cls, v):
+        return _validate_subagent_list(v)
 
 
 class EnvironmentResponse(BaseModel):
@@ -941,6 +1084,8 @@ class SessionResponse(BaseModel):
     agent_version: int
     environment_id: str
     status: SessionStatus
+    stop_reason: str | None = None          # Atlas A2
+    retry_count: int = 0                    # Atlas A2
     container_id: str | None = None
     title: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -955,6 +1100,11 @@ class SessionResponse(BaseModel):
     resources: list["SessionResource"] = Field(default_factory=list)
     outcome: "OutcomeDefinition | None" = None  # v0.6 — goal-driven sessions
     parent_session_id: str | None = None  # v0.6 — set for thread sub-sessions
+    # Atlas B7 — set for sessions the deployment scheduler created; the
+    # run history of a deployment is sessions filtered on this column.
+    deployment_id: str | None = None
+    # Atlas B8 — payload-at-rest encryption flag (x-events-encrypted opt-in).
+    events_encrypted: bool = False
 
 
 class EventResponse(BaseModel):
@@ -966,6 +1116,8 @@ class EventResponse(BaseModel):
     type: EventType
     payload: dict[str, Any] = Field(default_factory=dict)
     processed_at: datetime | None = None
+    # Atlas A3 (0017) — globally unique identity ('sevt_...').
+    event_id: str | None = None
 
 
 class PaginatedEventsResponse(BaseModel):
@@ -987,7 +1139,7 @@ class PaginatedListResponse(BaseModel):
 # Credential type and provider literals
 # ---------------------------------------------------------------------------
 
-CredentialType = Literal["bearer_token", "api_key", "oauth"]
+CredentialType = Literal["bearer_token", "api_key", "oauth", "byok_kek"]
 ProviderName = Literal["openrouter", "ollama"]
 
 
@@ -1066,10 +1218,35 @@ class CreateOAuthCredentialRequest(BaseModel):
     client_secret: str | None = None
 
 
+class CreateByokKekCredentialRequest(BaseModel):
+    """Create a customer-managed KEK credential (Atlas M6 BYOK).
+
+    The key-encryption-key wraps per-session data keys instead of (or
+    alongside) the platform master key — the "customer key registration"
+    half of the B8 spec. ``kek`` must be a valid Fernet key (base64
+    32-byte), the same format as ``VAULT_ENCRYPTION_KEY``.
+    """
+
+    credential_type: Literal["byok_kek"]
+    kek: str
+
+    @field_validator("kek")
+    @classmethod
+    def _validate_kek(cls, v: str) -> str:
+        try:
+            Fernet(v.encode())
+        except Exception as exc:
+            raise ValueError(
+                f"kek is not a valid Fernet key: {exc}"
+            ) from exc
+        return v
+
+
 CreateCredentialRequest = Annotated[
     CreateBearerTokenCredentialRequest
     | CreateApiKeyCredentialRequest
-    | CreateOAuthCredentialRequest,
+    | CreateOAuthCredentialRequest
+    | CreateByokKekCredentialRequest,
     Discriminator("credential_type"),
 ]
 
@@ -1082,6 +1259,20 @@ class UpdateCredentialRequest(BaseModel):
     access_token: str | None = None
     refresh_token: str | None = None
     client_secret: str | None = None
+    kek: str | None = None
+
+    @field_validator("kek")
+    @classmethod
+    def _validate_kek_update(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        try:
+            Fernet(v.encode())
+        except Exception as exc:
+            raise ValueError(
+                f"kek is not a valid Fernet key: {exc}"
+            ) from exc
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -1117,7 +1308,7 @@ class CredentialResponse(BaseModel):
 # Files API (v0.2.0)
 # ---------------------------------------------------------------------------
 
-FileSource = Literal["upload", "deliverable"]
+FileSource = Literal["upload", "deliverable", "artifact"]
 FileScopeType = Literal["session"]
 
 
@@ -1156,10 +1347,13 @@ SessionResourceState = Literal["mounted", "unmounting", "unmounted", "failed"]
 
 # Mount paths reserved by the platform — callers cannot mount resources here.
 # /mnt/session/outputs/ is owned by the deliverables watcher (v0.2 PR5).
+# /mnt/session/uploads/ is where uploaded files get auto-mounted by default
+# (Atlas B5) — explicit mounts cannot squat on the platform-owned subtree.
 # /mnt/memory/ is reserved for v0.3 memory stores.
 # /proc, /sys, /dev, /etc/linchpin/ are kernel / platform namespaces.
 RESERVED_MOUNT_PREFIXES: tuple[str, ...] = (
     "/mnt/session/outputs/",
+    "/mnt/session/uploads/",
     "/mnt/memory/",
     "/proc",
     "/sys",
@@ -1208,15 +1402,22 @@ class FileResource(BaseModel):
 
     The referenced file must have source='upload' (deliverables cannot be
     re-mounted into a different session — that would be a covert channel).
+
+    ``mount_path`` is optional since Atlas B5: when omitted, create_session
+    assigns ``/mnt/session/uploads/<basename>`` automatically (see
+    routes/sessions.py). Explicit values still go through the shared
+    validator, so platform-reserved prefixes are rejected.
     """
 
     type: Literal["file"]
     file_id: str
-    mount_path: str
+    mount_path: str | None = None
 
     @field_validator("mount_path")
     @classmethod
-    def _validate_mount_path(cls, value: str) -> str:
+    def _validate_mount_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _validate_mount_path(value)
 
 
@@ -1407,6 +1608,59 @@ class WebhookDelivery(BaseModel):
     next_attempt_at: datetime
     created_at: datetime
     completed_at: datetime | None
+
+
+# ---------------------------------------------------------------------------
+# Deployments (Atlas B7 — scheduled agent runs, FR-8.1)
+# ---------------------------------------------------------------------------
+
+
+class InitialEvent(BaseModel):
+    """One event seeded into every session a deployment triggers.
+
+    Only user-side inputs are accepted — a deployment must not be able
+    to forge agent.*/session.* events into its own session log.
+    """
+
+    type: Literal["user.message", "user.steer"]
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class CreateDeploymentRequest(BaseModel):
+    """POST /v1/deployments request body."""
+
+    agent_id: str
+    environment_id: str
+    cron: str
+    timezone: str = "UTC"
+    initial_events: list[InitialEvent] = Field(default_factory=list)
+
+
+class UpdateDeploymentRequest(BaseModel):
+    """PATCH /v1/deployments/{id} request body.
+
+    Changing ``cron`` or ``timezone`` recomputes ``next_run_at`` from
+    now (the new schedule starts from the edit, not the old plan).
+    """
+
+    cron: str | None = None
+    timezone: str | None = None
+    initial_events: list[InitialEvent] | None = None
+
+
+class DeploymentResponse(BaseModel):
+    """Deployment resource returned by the API."""
+
+    id: str
+    agent_id: str
+    environment_id: str
+    cron: str
+    timezone: str
+    initial_events: list[InitialEvent] = Field(default_factory=list)
+    status: Literal["paused", "active"]
+    next_run_at: datetime | None
+    created_at: datetime
+    archived_at: datetime | None
 
 
 # ---------------------------------------------------------------------------
@@ -1801,3 +2055,173 @@ class DreamListResponse(BaseModel):
     data: list[Dream]
     has_more: bool
     next_cursor: str | None = None
+
+
+# --- Atlas C1: multi-tenancy admin surface ---------------------------------
+
+
+class ProjectResponse(BaseModel):
+    """A project (tenant) under the caller's organization.
+
+    ``max_concurrent_sessions`` / ``monthly_token_budget`` are the
+    Atlas M5 (FR-11.2/11.3) quota settings; ``None`` = unlimited.
+    """
+
+    id: str
+    org_id: str
+    name: str
+    slug: str
+    max_concurrent_sessions: int | None = None
+    monthly_token_budget: int | None = None
+    created_at: datetime
+
+
+class UpdateProjectRequest(BaseModel):
+    """Body for ``PATCH /v1/projects/{id}`` (bootstrap key only).
+
+    Omitted fields keep their current value; explicit ``null`` clears a
+    limit (unlimited). ``ge=1`` guards against zero/negative no-op limits.
+    """
+
+    max_concurrent_sessions: int | None = Field(default=None, ge=1)
+    monthly_token_budget: int | None = Field(default=None, ge=1)
+
+
+class CreateApiKeyRequest(BaseModel):
+    """Body for ``POST /v1/api-keys``.
+
+    ``project_id`` is optional — defaults to the caller's project. Passing
+    a project from another organization is rejected with 404.
+    ``rate_limit_rpm`` (Atlas M5, FR-11.2) sets an optional requests-per-
+    minute limit enforced as an in-process sliding window.
+    """
+
+    name: str = ""
+    project_id: str | None = None
+    scopes: list[str] | None = None
+    rate_limit_rpm: int | None = Field(default=None, ge=1)
+
+
+class ApiKeyResponse(BaseModel):
+    """API key metadata (never includes the secret material)."""
+
+    id: str
+    project_id: str
+    name: str
+    prefix: str
+    scopes: list[str]
+    status: str
+    rate_limit_rpm: int | None = None
+    created_at: datetime
+    last_used_at: datetime | None = None
+
+
+class ApiKeyCreatedResponse(ApiKeyResponse):
+    """``POST /v1/api-keys`` response — ``key`` is the plaintext secret,
+    returned exactly once and never stored (only its SHA-256 hash is)."""
+
+    key: str
+
+
+# ---------------------------------------------------------------------------
+# Atlas M4 (FR-4.6) — BYO executor nodes
+# ---------------------------------------------------------------------------
+
+
+class ExecutorNodeCreateRequest(BaseModel):
+    """Body for ``POST /v1/executor-nodes``.
+
+    ``url`` is the base URL of the executor daemon
+    (``uvicorn app.executor_daemon:app``) reachable from the API.
+    """
+
+    name: str
+    url: str
+    max_sessions: int = Field(default=5, ge=1)
+
+
+class ExecutorNodeResponse(BaseModel):
+    """Executor node metadata (never includes the secret material).
+
+    ``status`` is derived from ``last_heartbeat_at`` at read time —
+    "online" when a heartbeat arrived within the freshness window,
+    "offline" otherwise (including nodes that never heartbeated).
+    """
+
+    id: str
+    org_id: str
+    name: str
+    url: str
+    prefix: str
+    max_sessions: int
+    status: str
+    last_heartbeat_at: datetime | None = None
+    created_at: datetime
+
+
+class ExecutorNodeCreatedResponse(ExecutorNodeResponse):
+    """``POST /v1/executor-nodes`` response — ``token`` is the plaintext
+    daemon credential, returned exactly once. It is stored Fernet-encrypted
+    (the API must present it to the daemon on every call)."""
+
+    token: str
+
+
+class ExecutorNodeHeartbeatResponse(BaseModel):
+    """``POST /v1/executor-nodes/{id}/heartbeat`` response."""
+
+    id: str
+    status: str = "online"
+
+
+# ---------------------------------------------------------------------------
+# Atlas M5 (FR-12.2) — unified error envelope schema for OpenAPI
+# ---------------------------------------------------------------------------
+
+
+class ErrorEnvelope(BaseModel):
+    """Envelope for every 4xx/5xx response (PRD §6.4).
+
+    ``error`` is a stable machine code (e.g. ``unauthorized``,
+    ``rate_limited``, ``quota_exceeded``); ``message`` is a human-readable
+    description; ``detail`` carries structured extras (validation errors,
+    limit values, ``retry_after``) or is null. Mirrors the runtime shape
+    produced by ``app.main._error_envelope`` — kept in sync by hand.
+    """
+
+    error: str
+    message: str
+    detail: Any = None
+
+
+# ---------------------------------------------------------------------------
+# Usage aggregation (Atlas B10.1 — GET /v1/usage)
+# ---------------------------------------------------------------------------
+
+
+class UsageBucket(BaseModel):
+    """Aggregated ``sessions.usage`` counters for one grouping bucket.
+
+    A bucket is either a UTC day (``group_by=day``, default) or a project
+    id (``group_by=project``). ``sessions`` counts the sessions folded
+    into the bucket; the four token counters mirror ``SessionUsage``.
+    """
+
+    bucket: str
+    sessions: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+
+
+class UsageResponse(BaseModel):
+    """``GET /v1/usage`` response — overall totals plus per-bucket rows."""
+
+    group_by: Literal["day", "project"]
+    from_: datetime | None = Field(None, alias="from")
+    to: datetime | None = None
+    total: UsageBucket
+    buckets: list[UsageBucket] = Field(default_factory=list)
+
+    model_config = ConfigDict(populate_by_name=True)

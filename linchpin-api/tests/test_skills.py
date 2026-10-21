@@ -238,7 +238,7 @@ def test_upload_skill_invalid_frontmatter_returns_422(mock_fetch_one, app_client
         headers=AUTH,
     )
     assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "invalid_skill_bundle"
+    assert resp.json()["error"] == "invalid_skill_bundle"
     mock_fetch_one.assert_not_called()
 
 
@@ -251,7 +251,7 @@ def test_upload_skill_too_large_returns_413(app_client):
         headers=AUTH,
     )
     assert resp.status_code == 413
-    assert resp.json()["detail"]["error"] == "skill_too_large"
+    assert resp.json()["error"] == "skill_too_large"
 
 
 @patch("app.routes.skills.fetch_one", new_callable=AsyncMock)

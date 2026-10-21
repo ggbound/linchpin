@@ -54,3 +54,8 @@ class PolicyEvaluator:
                         self._permissions[cfg.name] = cfg.permission_policy
             elif isinstance(tool, CustomToolConfig):
                 self._permissions[tool.name] = tool.permission_policy
+        # FR-6.1 — declared subagents get the spawn_subagent tool with a
+        # fixed ``always_ask`` policy: spawning a worker thread is a
+        # privileged operation and is intentionally not user-configurable.
+        if agent.multi_agents:
+            self._permissions["spawn_subagent"] = "always_ask"

@@ -11,11 +11,22 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
+import asyncpg
+
 from app.db import fetch_all, fetch_one
+from app.event_crypto import (
+    decrypt_payload,
+    encrypt_payload,
+    get_session_data_key,
+    is_control_event,
+)
 from app.models import Event, EventResponse, PaginatedEventsResponse
+
+logger = logging.getLogger("linchpin-api.events")
 
 
 # ---------------------------------------------------------------------------
@@ -31,10 +42,9 @@ from app.models import Event, EventResponse, PaginatedEventsResponse
 # `UniqueViolationError` against the events `PRIMARY KEY (session_id, seq)`.
 #
 # A per-session `asyncio.Lock` serializes the SELECT+INSERT pair so writers
-# in this process see a monotonic seq. Single-process correctness only —
-# if the api ever runs multiple workers per pool, this needs to move to a
-# DB-side advisory lock or a `WITH ... INSERT ... ON CONFLICT RETURNING`
-# retry loop.
+# in this process see a monotonic seq. Atlas C2 — cross-replica writers can
+# still race on MAX(seq)+1; `append_event` catches the resulting
+# UniqueViolationError and retries with a fresh MAX(seq) read (bounded).
 
 _session_event_locks: dict[uuid.UUID, asyncio.Lock] = {}
 
@@ -98,29 +108,55 @@ async def append_event(
     """
     sid = uuid.UUID(session_id)
 
-    async with _lock_for(sid):
-        # Get next seq number
-        row = await fetch_one(
-            "SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq FROM events WHERE session_id = $1",
-            sid,
-        )
-        next_seq: int = row["next_seq"]
-        cursor = encode_cursor(next_seq)
+    # Atlas B8 — business-content payloads of encrypted sessions are sealed
+    # into the {"enc": "v1", "ct": ...} envelope at rest. Control events
+    # (session.* / span.* / thread.*) and plaintext sessions pass through
+    # unchanged. The returned Event model keeps the plaintext payload, so
+    # callers (webhook fan-out included) see the original shape.
+    stored_payload: dict = payload
+    if not is_control_event(event_type):
+        data_key = await get_session_data_key(sid)
+        if data_key is not None:
+            stored_payload = encrypt_payload(payload, data_key)
 
-        # Insert event
-        payload_json = json.dumps(payload)
-        event_row = await fetch_one(
-            """
-            INSERT INTO events (session_id, cursor, seq, type, payload)
-            VALUES ($1, $2, $3, $4, $5::jsonb)
-            RETURNING *
-            """,
-            sid,
-            cursor,
-            next_seq,
-            event_type,
-            payload_json,
-        )
+    async with _lock_for(sid):
+        # Get next seq number and insert. Atlas C2 — cross-replica writers
+        # race on MAX(seq)+1 (the in-process lock above only serializes
+        # this process's tasks); the loser hits the events-table
+        # PRIMARY KEY (session_id, seq) and retries with a fresh read.
+        event_row = None
+        cursor = ""
+        for attempt in range(3):
+            row = await fetch_one(
+                "SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq FROM events WHERE session_id = $1",
+                sid,
+            )
+            next_seq: int = row["next_seq"]
+            cursor = encode_cursor(next_seq)
+
+            # Insert event
+            payload_json = json.dumps(stored_payload)
+            try:
+                event_row = await fetch_one(
+                    """
+                    INSERT INTO events (session_id, cursor, seq, type, payload)
+                    VALUES ($1, $2, $3, $4, $5::jsonb)
+                    RETURNING *
+                    """,
+                    sid,
+                    cursor,
+                    next_seq,
+                    event_type,
+                    payload_json,
+                )
+                break
+            except asyncpg.UniqueViolationError:
+                if attempt >= 2:
+                    raise
+                logger.warning(
+                    "Event seq collision for session %s (attempt %d); retrying",
+                    session_id, attempt + 1,
+                )
 
         # Update session stats and last_event_cursor. Kept inside the lock so
         # `last_event_cursor` advances monotonically with the seq we just
@@ -159,8 +195,14 @@ async def append_event(
         cursor=event_row["cursor"],
         seq=event_row["seq"],
         type=event_row["type"],
-        payload=json.loads(event_row["payload"]) if isinstance(event_row["payload"], str) else event_row["payload"],
+        # Atlas B8 — echo the plaintext payload the caller supplied; the
+        # stored row may carry the encrypted envelope. Webhook fan-out below
+        # therefore delivers the original shape to subscribers.
+        payload=payload,
         processed_at=event_row["processed_at"],
+        # Atlas A3 (0017) — DB-default identity; ``get`` tolerates
+        # pre-0017 rows/snapshots lacking the column.
+        event_id=event_row.get("event_id"),
     )
 
     # v0.2.0 item #14 — fan webhook-relevant events out to subscribers.
@@ -230,14 +272,23 @@ async def get_events(
     has_more = len(rows) > limit
     result_rows = rows[:limit]
 
+    # Atlas B8 — decrypt sealed payloads for API/SSE consumers. One key
+    # unwrap per page; plaintext control events pass through untouched.
+    data_key = await get_session_data_key(sid)
+
     events = [
         EventResponse(
             session_id=str(r["session_id"]),
             cursor=r["cursor"],
             seq=r["seq"],
             type=r["type"],
-            payload=json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"],
+            payload=decrypt_payload(
+                json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"],
+                data_key,
+            ),
             processed_at=r["processed_at"],
+            # Atlas A3 (0017) — DB-default identity.
+            event_id=r.get("event_id"),
         )
         for r in result_rows
     ]

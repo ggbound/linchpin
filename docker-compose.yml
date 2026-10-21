@@ -27,6 +27,10 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       VAULT_ENCRYPTION_KEY: ${VAULT_ENCRYPTION_KEY:-}
+      # Atlas B4 — image for the per-environment egress proxies that the
+      # API creates dynamically on `linchpin-limited` (one per limited env,
+      # allowlist derived from the env config).
+      LINCHPIN_EGRESS_PROXY_IMAGE: ${LINCHPIN_EGRESS_PROXY_IMAGE:-ubuntu/squid:24.04_stable}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
@@ -50,6 +54,26 @@ services:
       - "3000:80"
     depends_on:
       - linchpin-api
+
+  # Atlas B11 — optional LiteLLM gateway. Not started by default; run
+  # `docker compose --profile litellm up -d litellm` to enable. Agents then
+  # reach any OpenAI-compatible upstream (including self-hosted models) via
+  # provider="openrouter" + base_url=http://litellm:4000/v1.
+  # See docs/model-gateway.md.
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    profiles: ["litellm"]
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm.config.yaml:/app/config.yaml:ro
+    environment:
+      # Key LiteLLM uses as its own OpenRouter upstream credential.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      # Key agents present as Bearer to the gateway (vault credential with
+      # provider="openrouter", or OPENROUTER_API_KEY env fallback).
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-linchpin}
 
 volumes:
   pgdata:

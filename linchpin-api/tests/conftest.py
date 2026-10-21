@@ -81,6 +81,44 @@ def _set_api_key(monkeypatch: pytest.MonkeyPatch):
     # exercise GC directly call ``run_memory_gc()``.
     monkeypatch.setenv("LINCHPIN_MEMORY_GC", "false")
 
+    # Atlas B10 — keep the metrics gauges sampler out of tests (it would
+    # tick against an uninitialised DB pool). /metrics itself is still
+    # exercised in test_metrics.py.
+    monkeypatch.setenv("LINCHPIN_METRICS_SAMPLER", "false")
+
+    # Atlas B7 — keep the deployment scheduler out of tests (same reason:
+    # it would poll an uninitialised DB pool). Individual tests that
+    # exercise the loop monkeypatch this back on.
+    monkeypatch.setenv("LINCHPIN_DEPLOYMENTS_SCHEDULER", "false")
+
+    # Atlas C2 — keep the lease supervisor out of tests (it would poll the
+    # uninitialised DB pool). Takeover is exercised directly in test_cluster.py.
+    monkeypatch.setenv("LINCHPIN_LEASE_SUPERVISOR", "false")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_event_crypto(monkeypatch: pytest.MonkeyPatch):
+    """Atlas B8 — isolate event-encryption state for unit tests.
+
+    - Starts every test with an empty in-process data-key cache so a key
+      cached by one test can't leak into another.
+    - Defaults the crypto module's DB lookup to "no key" (None): the
+      asyncpg pool is never initialised in unit tests, so a live
+      ``fetch_one`` would raise RuntimeError. Tests that exercise the
+      DB fallback patch ``app.event_crypto.fetch_one`` themselves.
+    - Atlas M6 — same isolation for the BYOK KEK cache.
+    """
+    from app import event_crypto
+
+    event_crypto._data_key_cache.clear()
+    event_crypto._kek_cache.clear()
+    monkeypatch.setattr(
+        event_crypto, "fetch_one", AsyncMock(return_value=None)
+    )
+    yield
+    event_crypto._data_key_cache.clear()
+    event_crypto._kek_cache.clear()
+
 
 @pytest.fixture()
 def client():
@@ -94,6 +132,10 @@ def client():
         patch("app.main.DockerSandbox") as MockSandbox,
         patch("app.main.cleanup_expired_sessions", new_callable=AsyncMock),
         patch("app.main.recover_sessions", new_callable=AsyncMock),
+        # Atlas A8 — keep the idempotency-key cleanup loop out of test logs.
+        patch("app.main.idempotency_cleanup_loop", new_callable=AsyncMock),
+        # Atlas B12 — keep the events retention loop out of test logs.
+        patch("app.main.events_retention_cleanup_loop", new_callable=AsyncMock),
     ):
         mock_sandbox = MagicMock()
         mock_sandbox.create = AsyncMock(return_value="container-mock")

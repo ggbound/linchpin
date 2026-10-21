@@ -24,8 +24,10 @@ import logging
 import uuid
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.audit import record_audit
+from app.auth import AuthContext, require_auth
 from app.db import fetch_all, fetch_one, execute, get_pool
 from app.encryption import get_encryption_service
 from app.models import (
@@ -75,8 +77,8 @@ def _row_to_credential(row) -> CredentialResponse:
     )
 
 
-async def _get_vault_or_404(vault_id: str):
-    """Fetch a vault row by id or raise 404."""
+async def _get_vault_or_404(vault_id: str, ctx: AuthContext):
+    """Fetch a vault row by id (scoped to the caller's project) or raise 404."""
     try:
         uid = uuid.UUID(vault_id)
     except ValueError:
@@ -84,7 +86,11 @@ async def _get_vault_or_404(vault_id: str):
             status_code=404,
             detail={"error": "not_found", "message": f"Vault {vault_id} not found"},
         )
-    row = await fetch_one("SELECT * FROM vaults WHERE id = $1", uid)
+    row = await fetch_one(
+        "SELECT * FROM vaults WHERE id = $1 AND project_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
+    )
     if row is None:
         raise HTTPException(
             status_code=404,
@@ -99,21 +105,26 @@ async def _get_vault_or_404(vault_id: str):
 
 
 @router.post("", status_code=201, response_model=VaultResponse)
-async def create_vault(body: CreateVaultRequest) -> VaultResponse:
+async def create_vault(
+    body: CreateVaultRequest,
+    ctx: AuthContext = Depends(require_auth),
+) -> VaultResponse:
     """Create a new vault resource."""
     vault_id = str(uuid.uuid4())
     metadata_json = json.dumps(body.metadata)
 
     row = await fetch_one(
         """
-        INSERT INTO vaults (id, display_name, metadata)
-        VALUES ($1, $2, $3::jsonb)
+        INSERT INTO vaults (id, project_id, display_name, metadata)
+        VALUES ($1, $2, $3, $4::jsonb)
         RETURNING *
         """,
         uuid.UUID(vault_id),
+        uuid.UUID(ctx.project_id),
         body.display_name,
         metadata_json,
     )
+    await record_audit("vault.created", "vault", vault_id, ctx=ctx, detail={"display_name": body.display_name})
     return _row_to_vault(row)
 
 
@@ -121,10 +132,13 @@ async def create_vault(body: CreateVaultRequest) -> VaultResponse:
 async def list_vaults(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    ctx: AuthContext = Depends(require_auth),
 ) -> PaginatedListResponse:
     """Return a paginated list of vaults."""
     rows = await fetch_all(
-        "SELECT * FROM vaults ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+        "SELECT * FROM vaults WHERE project_id = $1"
+        " ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+        uuid.UUID(ctx.project_id),
         limit + 1,
         offset,
     )
@@ -138,14 +152,20 @@ async def list_vaults(
 
 
 @router.get("/{vault_id}", response_model=VaultResponse)
-async def get_vault(vault_id: str) -> VaultResponse:
+async def get_vault(
+    vault_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> VaultResponse:
     """Retrieve a vault by id."""
-    row = await _get_vault_or_404(vault_id)
+    row = await _get_vault_or_404(vault_id, ctx)
     return _row_to_vault(row)
 
 
 @router.delete("/{vault_id}", status_code=204)
-async def delete_vault(vault_id: str):
+async def delete_vault(
+    vault_id: str,
+    ctx: AuthContext = Depends(require_auth),
+):
     """Delete a vault and all its credentials (cascade)."""
     try:
         uid = uuid.UUID(vault_id)
@@ -154,19 +174,27 @@ async def delete_vault(vault_id: str):
             status_code=404,
             detail={"error": "not_found", "message": f"Vault {vault_id} not found"},
         )
-    result = await execute("DELETE FROM vaults WHERE id = $1", uid)
+    result = await execute(
+        "DELETE FROM vaults WHERE id = $1 AND project_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
+    )
     # result is e.g. "DELETE 1" or "DELETE 0"
     if result == "DELETE 0":
         raise HTTPException(
             status_code=404,
             detail={"error": "not_found", "message": f"Vault {vault_id} not found"},
         )
+    await record_audit("vault.deleted", "vault", vault_id, ctx=ctx)
 
 
 @router.post("/{vault_id}/archive", response_model=VaultResponse)
-async def archive_vault(vault_id: str) -> VaultResponse:
+async def archive_vault(
+    vault_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> VaultResponse:
     """Archive a vault: set archived_at, purge credential secrets."""
-    row = await _get_vault_or_404(vault_id)
+    row = await _get_vault_or_404(vault_id, ctx)
 
     if row["archived_at"] is not None:
         raise HTTPException(
@@ -182,10 +210,11 @@ async def archive_vault(vault_id: str) -> VaultResponse:
             updated = await conn.fetchrow(
                 """
                 UPDATE vaults SET archived_at = now(), updated_at = now()
-                WHERE id = $1
+                WHERE id = $1 AND project_id = $2
                 RETURNING *
                 """,
                 uid,
+                uuid.UUID(ctx.project_id),
             )
             # Archive all credentials and purge secrets
             await conn.execute(
@@ -198,6 +227,10 @@ async def archive_vault(vault_id: str) -> VaultResponse:
                 """,
                 uid,
             )
+    await record_audit(
+        "vault.archived", "vault", vault_id, ctx=ctx,
+        detail={"credentials_purged": True},
+    )
     return _row_to_vault(updated)
 
 
@@ -219,13 +252,19 @@ def _build_secrets_json(req: CreateCredentialRequest) -> str:
         if req.client_secret is not None:
             secrets["client_secret"] = req.client_secret
         return json.dumps(secrets)
+    elif req.credential_type == "byok_kek":
+        return json.dumps({"kek": req.kek})
     raise ValueError(f"Unknown credential_type: {req.credential_type}")
 
 
 @router.post("/{vault_id}/credentials", status_code=201, response_model=CredentialResponse)
-async def create_credential(vault_id: str, body: CreateCredentialRequest) -> CredentialResponse:
+async def create_credential(
+    vault_id: str,
+    body: CreateCredentialRequest,
+    ctx: AuthContext = Depends(require_auth),
+) -> CredentialResponse:
     """Create a credential within a vault."""
-    vault_row = await _get_vault_or_404(vault_id)
+    vault_row = await _get_vault_or_404(vault_id, ctx)
 
     # Reject if vault is archived
     if vault_row["archived_at"] is not None:
@@ -288,6 +327,10 @@ async def create_credential(vault_id: str, body: CreateCredentialRequest) -> Cre
             },
         )
 
+    await record_audit(
+        "credential.created", "credential", cred_id, ctx=ctx,
+        detail={"vault_id": vault_id, "credential_type": body.credential_type},
+    )
     return _row_to_credential(row)
 
 
@@ -296,9 +339,10 @@ async def list_credentials(
     vault_id: str,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    ctx: AuthContext = Depends(require_auth),
 ) -> PaginatedListResponse:
     """Return a paginated list of credentials in a vault (secrets omitted)."""
-    await _get_vault_or_404(vault_id)
+    await _get_vault_or_404(vault_id, ctx)
     uid = uuid.UUID(vault_id)
 
     rows = await fetch_all(
@@ -322,9 +366,13 @@ async def list_credentials(
 
 
 @router.get("/{vault_id}/credentials/{credential_id}", response_model=CredentialResponse)
-async def get_credential(vault_id: str, credential_id: str) -> CredentialResponse:
+async def get_credential(
+    vault_id: str,
+    credential_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> CredentialResponse:
     """Retrieve a credential by id (secrets omitted)."""
-    await _get_vault_or_404(vault_id)
+    await _get_vault_or_404(vault_id, ctx)
 
     try:
         cred_uid = uuid.UUID(credential_id)
@@ -349,10 +397,13 @@ async def get_credential(vault_id: str, credential_id: str) -> CredentialRespons
 
 @router.patch("/{vault_id}/credentials/{credential_id}", response_model=CredentialResponse)
 async def update_credential(
-    vault_id: str, credential_id: str, body: UpdateCredentialRequest
+    vault_id: str,
+    credential_id: str,
+    body: UpdateCredentialRequest,
+    ctx: AuthContext = Depends(require_auth),
 ) -> CredentialResponse:
     """Update secret fields on a credential."""
-    await _get_vault_or_404(vault_id)
+    await _get_vault_or_404(vault_id, ctx)
 
     try:
         cred_uid = uuid.UUID(credential_id)
@@ -382,7 +433,7 @@ async def update_credential(
 
     # Build new secrets from the update body (only non-None fields)
     secrets: dict = {}
-    for field in ("token", "api_key", "access_token", "refresh_token", "client_secret"):
+    for field in ("token", "api_key", "access_token", "refresh_token", "client_secret", "kek"):
         val = getattr(body, field, None)
         if val is not None:
             secrets[field] = val
@@ -404,13 +455,21 @@ async def update_credential(
         cred_uid,
         uuid.UUID(vault_id),
     )
+    await record_audit(
+        "credential.updated", "credential", credential_id, ctx=ctx,
+        detail={"vault_id": vault_id, "fields": sorted(secrets.keys())},
+    )
     return _row_to_credential(updated)
 
 
 @router.delete("/{vault_id}/credentials/{credential_id}", status_code=204)
-async def delete_credential(vault_id: str, credential_id: str):
+async def delete_credential(
+    vault_id: str,
+    credential_id: str,
+    ctx: AuthContext = Depends(require_auth),
+):
     """Delete a credential."""
-    await _get_vault_or_404(vault_id)
+    await _get_vault_or_404(vault_id, ctx)
 
     try:
         cred_uid = uuid.UUID(credential_id)
@@ -430,12 +489,20 @@ async def delete_credential(vault_id: str, credential_id: str):
             status_code=404,
             detail={"error": "not_found", "message": f"Credential {credential_id} not found"},
         )
+    await record_audit(
+        "credential.deleted", "credential", credential_id, ctx=ctx,
+        detail={"vault_id": vault_id},
+    )
 
 
 @router.post("/{vault_id}/credentials/{credential_id}/archive", response_model=CredentialResponse)
-async def archive_credential(vault_id: str, credential_id: str) -> CredentialResponse:
+async def archive_credential(
+    vault_id: str,
+    credential_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> CredentialResponse:
     """Archive a credential: set archived_at, purge encrypted secrets."""
-    await _get_vault_or_404(vault_id)
+    await _get_vault_or_404(vault_id, ctx)
 
     try:
         cred_uid = uuid.UUID(credential_id)
@@ -471,5 +538,9 @@ async def archive_credential(vault_id: str, credential_id: str) -> CredentialRes
         """,
         cred_uid,
         uuid.UUID(vault_id),
+    )
+    await record_audit(
+        "credential.archived", "credential", credential_id, ctx=ctx,
+        detail={"vault_id": vault_id},
     )
     return _row_to_credential(updated)

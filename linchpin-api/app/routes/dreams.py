@@ -26,8 +26,9 @@ import uuid
 from datetime import datetime, timezone
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.auth import AuthContext, require_auth
 from app.db import execute, fetch_all, fetch_one
 from app.models import (
     CreateDreamRequest,
@@ -43,9 +44,9 @@ logger = logging.getLogger("linchpin-api")
 router = APIRouter(prefix="/dreams", tags=["dreams"])
 
 
-# Mirrors the memory_stores / skills approach — single-tenant
-# placeholder until multi-tenancy lands.
-_DEFAULT_WORKSPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
+# Atlas C1 — the legacy ``workspace_id`` column now carries the caller's
+# project UUID (auth-injected tenant boundary). Kept the column name for
+# schema continuity; semantically it *is* project_id.
 
 
 def default_dreamer_agent_id() -> str | None:
@@ -92,7 +93,10 @@ def _parse_uuid(value: str, label: str = "Dream") -> uuid.UUID:
 
 
 @router.post("", response_model=Dream, status_code=201)
-async def start_dream(body: CreateDreamRequest) -> Dream:
+async def start_dream(
+    body: CreateDreamRequest,
+    ctx: AuthContext = Depends(require_auth),
+) -> Dream:
     """Kick off a Dream.
 
     Validates the input memory store exists + isn't archived, that
@@ -114,9 +118,11 @@ async def start_dream(body: CreateDreamRequest) -> Dream:
                 "message": f"Invalid input_memory_store_id: {body.input_memory_store_id}",
             },
         )
+    project_uid = uuid.UUID(ctx.project_id)
     input_row = await fetch_one(
-        "SELECT id, archived_at FROM memory_stores WHERE id = $1",
+        "SELECT id, archived_at FROM memory_stores WHERE id = $1 AND workspace_id = $2",
         input_uid,
+        project_uid,
     )
     if input_row is None:
         raise HTTPException(
@@ -160,8 +166,9 @@ async def start_dream(body: CreateDreamRequest) -> Dream:
             },
         )
     agent_row = await fetch_one(
-        "SELECT id, archived_at FROM agents WHERE id = $1",
+        "SELECT id, archived_at FROM agents WHERE id = $1 AND project_id = $2",
         dreamer_uid,
+        project_uid,
     )
     if agent_row is None:
         raise HTTPException(
@@ -187,7 +194,7 @@ async def start_dream(body: CreateDreamRequest) -> Dream:
     existing_out = await fetch_one(
         "SELECT id FROM memory_stores WHERE workspace_id = $1 AND name = $2 "
         "AND archived_at IS NULL",
-        _DEFAULT_WORKSPACE,
+        project_uid,
         body.output_store_name,
     )
     if existing_out is not None:
@@ -212,7 +219,7 @@ async def start_dream(body: CreateDreamRequest) -> Dream:
         RETURNING *
         """,
         dream_id,
-        _DEFAULT_WORKSPACE,
+        project_uid,
         input_uid,
         body.output_store_name,
         dreamer_uid,
@@ -226,20 +233,22 @@ async def list_dreams(
     status: DreamStatus | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    ctx: AuthContext = Depends(require_auth),
 ) -> DreamListResponse:
     """List Dreams in the workspace, newest first. Optional ``status``
     filter."""
+    project_uid = uuid.UUID(ctx.project_id)
     if status is not None:
         rows = await fetch_all(
             "SELECT * FROM dreams WHERE workspace_id = $1 AND status = $2 "
             "ORDER BY created_at DESC LIMIT $3 OFFSET $4",
-            _DEFAULT_WORKSPACE, status, limit + 1, offset,
+            project_uid, status, limit + 1, offset,
         )
     else:
         rows = await fetch_all(
             "SELECT * FROM dreams WHERE workspace_id = $1 "
             "ORDER BY created_at DESC LIMIT $2 OFFSET $3",
-            _DEFAULT_WORKSPACE, limit + 1, offset,
+            project_uid, limit + 1, offset,
         )
     has_more = len(rows) > limit
     items = rows[:limit]
@@ -251,9 +260,16 @@ async def list_dreams(
 
 
 @router.get("/{dream_id}", response_model=Dream)
-async def get_dream(dream_id: str) -> Dream:
+async def get_dream(
+    dream_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> Dream:
     uid = _parse_uuid(dream_id)
-    row = await fetch_one("SELECT * FROM dreams WHERE id = $1", uid)
+    row = await fetch_one(
+        "SELECT * FROM dreams WHERE id = $1 AND workspace_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
+    )
     if row is None:
         raise HTTPException(
             status_code=404,
@@ -263,7 +279,10 @@ async def get_dream(dream_id: str) -> Dream:
 
 
 @router.post("/{dream_id}/cancel", response_model=Dream)
-async def cancel_dream(dream_id: str) -> Dream:
+async def cancel_dream(
+    dream_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> Dream:
     """Cancel a pending or running Dream. Terminal Dreams (``completed``
     / ``failed`` / ``canceled``) return 409 — there's nothing to cancel.
 
@@ -273,7 +292,11 @@ async def cancel_dream(dream_id: str) -> Dream:
     Dream-row cancel.
     """
     uid = _parse_uuid(dream_id)
-    row = await fetch_one("SELECT * FROM dreams WHERE id = $1", uid)
+    row = await fetch_one(
+        "SELECT * FROM dreams WHERE id = $1 AND workspace_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
+    )
     if row is None:
         raise HTTPException(
             status_code=404,
@@ -290,8 +313,8 @@ async def cancel_dream(dream_id: str) -> Dream:
     now = datetime.now(tz=timezone.utc)
     updated = await fetch_one(
         "UPDATE dreams SET status = 'canceled', ended_at = $1 "
-        "WHERE id = $2 RETURNING *",
-        now, uid,
+        "WHERE id = $2 AND workspace_id = $3 RETURNING *",
+        now, uid, uuid.UUID(ctx.project_id),
     )
 
     # Best-effort terminate the dreamer's session — the row already

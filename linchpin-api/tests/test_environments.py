@@ -123,7 +123,7 @@ def test_get_environment_not_found_returns_404(mock_fetch, client):
     resp = client.get(f"/v1/environments/{eid}", headers=AUTH)
 
     assert resp.status_code == 404
-    body = resp.json()["detail"]
+    body = resp.json()
     assert body["error"] == "not_found"
 
 
@@ -263,8 +263,9 @@ def test_delete_environment_409_when_session_active(mock_fetch, mock_execute, cl
 
     resp = client.delete(f"/v1/environments/{eid}", headers=AUTH)
     assert resp.status_code == 409
-    detail = resp.json()["detail"]
-    assert detail["error"] == "environment_in_use"
+    body = resp.json()
+    assert body["error"] == "environment_in_use"
+    detail = body["detail"]
     assert detail["blocking_session_id"] == str(sid)
     assert detail["blocking_session_status"] == "running"
     mock_execute.assert_not_awaited()

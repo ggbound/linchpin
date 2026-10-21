@@ -214,6 +214,8 @@ def sandbox_client(tmp_path):
         patch("app.main.DockerSandbox") as MockSandbox,
         patch("app.main.cleanup_expired_sessions", new_callable=AsyncMock),
         patch("app.main.recover_sessions", new_callable=AsyncMock),
+        # Atlas A8 — keep the idempotency-key cleanup loop out of test logs.
+        patch("app.main.idempotency_cleanup_loop", new_callable=AsyncMock),
         patch("app.routes.sessions.run_session", new_callable=AsyncMock),
         patch("app.routes.sessions.get_file_store", return_value=fake_store),
         patch("app.routes.sessions.os.path.isfile", return_value=True),
@@ -234,9 +236,13 @@ def sandbox_client(tmp_path):
             yield c, mock_sandbox
 
 
+@patch("app.routes.sessions.transition", new_callable=AsyncMock)
+@patch("app.routes.sessions.execute", new_callable=AsyncMock)
 @patch("app.routes.sessions.fetch_all", new_callable=AsyncMock)
 @patch("app.routes.sessions.fetch_one", new_callable=AsyncMock)
-def test_create_session_with_outcome_persists(mock_fetch_one, mock_fetch_all, sandbox_client):
+def test_create_session_with_outcome_persists(
+    mock_fetch_one, mock_fetch_all, mock_execute, mock_transition, sandbox_client,
+):
     client, _ = sandbox_client
     agent_id = str(uuid.uuid4())
     env_id = str(uuid.uuid4())
@@ -256,6 +262,11 @@ def test_create_session_with_outcome_persists(mock_fetch_one, mock_fetch_all, sa
         _make_agent_row(agent_id=agent_id),
         _make_env_row(env_id=env_id),
         _make_agent_row(agent_id=grader_id),  # grader existence check
+        _make_session_row(
+            session_id=sid, agent_id=agent_id, environment_id=env_id,
+            outcome=outcome,
+        ),
+        # Atlas A2 — post-transition row refresh ends the create path.
         _make_session_row(
             session_id=sid, agent_id=agent_id, environment_id=env_id,
             outcome=outcome,
@@ -303,7 +314,7 @@ def test_create_session_outcome_grader_not_found_returns_422(
         headers=AUTH,
     )
     assert resp.status_code == 422
-    assert "grader" in resp.json()["detail"]["message"]
+    assert "grader" in resp.json()["message"]
 
 
 @patch("app.routes.sessions.fetch_all", new_callable=AsyncMock)
@@ -334,7 +345,7 @@ def test_create_session_outcome_grader_archived_returns_422(
         headers=AUTH,
     )
     assert resp.status_code == 422
-    assert "archived" in resp.json()["detail"]["message"]
+    assert "archived" in resp.json()["message"]
 
 
 @patch("app.routes.sessions.execute", new_callable=AsyncMock)

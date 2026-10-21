@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app import events as events_mod
+from app.event_crypto import generate_data_key
 from app.events import (
     append_event,
     decode_cursor,
@@ -430,3 +431,155 @@ class TestGetEvents:
         await get_events(sid, after_cursor=None, limit=10, types=[])
         sql = mock_fetch.await_args.args[0]
         assert "type = ANY" not in sql
+
+
+# ---------------------------------------------------------------------------
+# Atlas B8 — envelope encryption
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def _encryption_key(monkeypatch):
+    """Master key for the encryption service (B8 tests)."""
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setenv("VAULT_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    from app.encryption import reset_encryption_service
+
+    reset_encryption_service()
+    yield
+    reset_encryption_service()
+
+
+class TestAppendEventEncryption:
+    """B8 — business-content payloads of encrypted sessions are sealed at
+    rest; the returned Event keeps the plaintext payload."""
+
+    @pytest.mark.asyncio
+    @patch("app.events.fetch_one", new_callable=AsyncMock)
+    async def test_append_seals_business_payload(self, mock_fetch, _encryption_key):
+        from app.event_crypto import (
+            cache_session_data_key,
+            drop_session_data_key,
+        )
+
+        sid = str(uuid.uuid4())
+        data_key = generate_data_key()
+        cache_session_data_key(sid, data_key)
+        payload = {"content": "secret message"}
+
+        mock_fetch.side_effect = [
+            {"next_seq": 1},
+            # INSERT RETURNING echoes whatever payload_json was bound — the
+            # fake row's payload value is irrelevant; the sealed shape is
+            # asserted on the INSERT arg below.
+            _fake_event_row(sid, encode_cursor(1), 1, "user.message", {}),
+            {"id": uuid.UUID(sid)},
+        ]
+
+        event = await append_event(sid, "user.message", payload)
+
+        # The INSERT's bound payload is the envelope, not the plaintext.
+        insert_call = mock_fetch.call_args_list[1]
+        assert insert_call[0][0].lstrip().startswith("INSERT INTO events")
+        stored = json.loads(insert_call[0][5])
+        assert stored["enc"] == "v1"
+        assert isinstance(stored["ct"], str)
+        assert "secret message" not in json.dumps(stored)
+
+        # The returned Event echoes the plaintext (webhook fan-out shape).
+        assert event.payload == payload
+        drop_session_data_key(sid)
+
+    @pytest.mark.asyncio
+    @patch("app.events.fetch_one", new_callable=AsyncMock)
+    async def test_append_control_event_stays_plaintext(self, mock_fetch, _encryption_key):
+        from app.event_crypto import (
+            cache_session_data_key,
+            drop_session_data_key,
+        )
+
+        sid = str(uuid.uuid4())
+        cache_session_data_key(sid, generate_data_key())
+        payload = {"summary": "compacted", "covered_seq_end": 4}
+
+        mock_fetch.side_effect = [
+            {"next_seq": 1},
+            _fake_event_row(sid, encode_cursor(1), 1, "session.compacted", payload),
+            {"id": uuid.UUID(sid)},
+        ]
+
+        event = await append_event(sid, "session.compacted", payload)
+
+        insert_call = mock_fetch.call_args_list[1]
+        stored = json.loads(insert_call[0][5])
+        assert stored == payload  # control events never sealed
+        assert event.payload == payload
+        drop_session_data_key(sid)
+
+    @pytest.mark.asyncio
+    @patch("app.events.fetch_one", new_callable=AsyncMock)
+    async def test_append_plaintext_session_unsealed(self, mock_fetch):
+        """No cached key (plaintext session) → payload stored as-is."""
+        sid = str(uuid.uuid4())
+        payload = {"content": "hello"}
+
+        mock_fetch.side_effect = [
+            {"next_seq": 1},
+            _fake_event_row(sid, encode_cursor(1), 1, "user.message", payload),
+            {"id": uuid.UUID(sid)},
+        ]
+
+        event = await append_event(sid, "user.message", payload)
+
+        insert_call = mock_fetch.call_args_list[1]
+        assert json.loads(insert_call[0][5]) == payload
+        assert event.payload == payload
+
+
+class TestGetEventsDecryption:
+    """B8 — GET events decrypts sealed payloads for API/SSE consumers."""
+
+    @pytest.mark.asyncio
+    @patch("app.events.fetch_all", new_callable=AsyncMock)
+    async def test_get_events_decrypts_sealed_payloads(self, mock_fetch, _encryption_key):
+        from cryptography.fernet import Fernet as _Fernet
+
+        from app.event_crypto import (
+            cache_session_data_key,
+            drop_session_data_key,
+        )
+
+        sid = str(uuid.uuid4())
+        data_key = generate_data_key()
+        cache_session_data_key(sid, data_key)
+
+        sealed = {
+            "enc": "v1",
+            "ct": _Fernet(data_key.encode())
+            .encrypt(json.dumps({"content": "secret"}).encode())
+            .decode(),
+        }
+        rows = _fake_event_rows(sid, 2)
+        rows[0]["payload"] = sealed
+        rows[1]["payload"] = {"summary": "control"}  # control event, plaintext
+        mock_fetch.return_value = rows
+
+        result = await get_events(sid, after_cursor=None, limit=10)
+
+        assert result.events[0].payload == {"content": "secret"}
+        assert result.events[1].payload == {"summary": "control"}
+        drop_session_data_key(sid)
+
+    @pytest.mark.asyncio
+    @patch("app.events.fetch_all", new_callable=AsyncMock)
+    async def test_get_events_plaintext_session_passthrough(self, mock_fetch):
+        """No data key → payloads returned exactly as stored."""
+        sid = str(uuid.uuid4())
+        rows = _fake_event_rows(sid, 1)
+        rows[0]["payload"] = {"content": "plain"}
+        mock_fetch.return_value = rows
+
+        result = await get_events(sid, after_cursor=None, limit=10)
+
+        assert result.events[0].payload == {"content": "plain"}

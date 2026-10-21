@@ -14,8 +14,10 @@ from __future__ import annotations
 import json
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.audit import record_audit
+from app.auth import AuthContext, require_auth
 from app.db import execute, fetch_all, fetch_one
 from app.models import (
     CreateEnvironmentRequest,
@@ -33,7 +35,7 @@ def _row_to_environment(row) -> EnvironmentResponse:
         name=row["name"],
         config=json.loads(row["config"]) if isinstance(row["config"], str) else row["config"],
         created_at=row["created_at"],
-        archived_at=row["archived_at"] if "archived_at" in row.keys() else None,
+        archived_at=row["archived_at"] if "archived_at" in set(row.keys()) else None,
     )
 
 
@@ -48,7 +50,10 @@ def _parse_env_uuid(environment_id: str) -> uuid.UUID:
 
 
 @router.post("", status_code=201, response_model=EnvironmentResponse)
-async def create_environment(body: CreateEnvironmentRequest) -> EnvironmentResponse:
+async def create_environment(
+    body: CreateEnvironmentRequest,
+    ctx: AuthContext = Depends(require_auth),
+) -> EnvironmentResponse:
     """Create a new environment resource."""
     env_id = str(uuid.uuid4())
 
@@ -56,25 +61,35 @@ async def create_environment(body: CreateEnvironmentRequest) -> EnvironmentRespo
 
     row = await fetch_one(
         """
-        INSERT INTO environments (id, name, config)
-        VALUES ($1, $2, $3::jsonb)
+        INSERT INTO environments (id, name, config, project_id)
+        VALUES ($1, $2, $3::jsonb, $4)
         RETURNING *
         """,
         uuid.UUID(env_id),
         body.name,
         json.dumps(config_json),
+        uuid.UUID(ctx.project_id),
     )
+
+    await record_audit("environment.created", "environment", env_id, ctx=ctx, detail={"name": body.name})
 
     return _row_to_environment(row)
 
 
 @router.get("/{environment_id}", response_model=EnvironmentResponse)
-async def get_environment(environment_id: str) -> EnvironmentResponse:
+async def get_environment(
+    environment_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> EnvironmentResponse:
     """Retrieve an environment by id. Returns archived envs too — callers
     that need to filter can check ``archived_at`` on the response."""
     uid = _parse_env_uuid(environment_id)
 
-    row = await fetch_one("SELECT * FROM environments WHERE id = $1", uid)
+    row = await fetch_one(
+        "SELECT * FROM environments WHERE id = $1 AND project_id = $2",
+        uid,
+        uuid.UUID(ctx.project_id),
+    )
     if row is None:
         raise HTTPException(
             status_code=404,
@@ -88,21 +103,28 @@ async def list_environments(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     include_archived: bool = Query(default=False),
+    ctx: AuthContext = Depends(require_auth),
 ) -> PaginatedListResponse:
     """Return a paginated list of environments. Archived envs are excluded
     by default — opt in with ``?include_archived=true``."""
+    project_uid = uuid.UUID(ctx.project_id)
     if include_archived:
         rows = await fetch_all(
-            "SELECT * FROM environments ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+            """SELECT * FROM environments
+               WHERE project_id = $1
+               ORDER BY created_at DESC
+               LIMIT $2 OFFSET $3""",
+            project_uid,
             limit + 1,
             offset,
         )
     else:
         rows = await fetch_all(
             """SELECT * FROM environments
-               WHERE archived_at IS NULL
+               WHERE project_id = $1 AND archived_at IS NULL
                ORDER BY created_at DESC
-               LIMIT $1 OFFSET $2""",
+               LIMIT $2 OFFSET $3""",
+            project_uid,
             limit + 1,
             offset,
         )
@@ -120,7 +142,10 @@ async def list_environments(
 
 
 @router.post("/{environment_id}/archive", response_model=EnvironmentResponse)
-async def archive_environment(environment_id: str) -> EnvironmentResponse:
+async def archive_environment(
+    environment_id: str,
+    ctx: AuthContext = Depends(require_auth),
+) -> EnvironmentResponse:
     """Soft-delete an environment (v0.2.0 item #6).
 
     Idempotent — archiving an already-archived env returns the same row
@@ -129,8 +154,13 @@ async def archive_environment(environment_id: str) -> EnvironmentResponse:
     replay purposes.
     """
     uid = _parse_env_uuid(environment_id)
+    project_uid = uuid.UUID(ctx.project_id)
 
-    existing = await fetch_one("SELECT * FROM environments WHERE id = $1", uid)
+    existing = await fetch_one(
+        "SELECT * FROM environments WHERE id = $1 AND project_id = $2",
+        uid,
+        project_uid,
+    )
     if existing is None:
         raise HTTPException(
             status_code=404,
@@ -143,15 +173,20 @@ async def archive_environment(environment_id: str) -> EnvironmentResponse:
     row = await fetch_one(
         """UPDATE environments
               SET archived_at = now()
-            WHERE id = $1
+            WHERE id = $1 AND project_id = $2
         RETURNING *""",
         uid,
+        project_uid,
     )
+    await record_audit("environment.archived", "environment", environment_id, ctx=ctx)
     return _row_to_environment(row)
 
 
 @router.delete("/{environment_id}", status_code=204)
-async def delete_environment(environment_id: str):
+async def delete_environment(
+    environment_id: str,
+    ctx: AuthContext = Depends(require_auth),
+):
     """Hard-delete an environment (v0.2.0 item #6).
 
     Rejects 409 if any non-terminated session still references this env —
@@ -159,8 +194,13 @@ async def delete_environment(environment_id: str):
     soft-delete path; this endpoint is for permanent removal.
     """
     uid = _parse_env_uuid(environment_id)
+    project_uid = uuid.UUID(ctx.project_id)
 
-    existing = await fetch_one("SELECT id FROM environments WHERE id = $1", uid)
+    existing = await fetch_one(
+        "SELECT id FROM environments WHERE id = $1 AND project_id = $2",
+        uid,
+        project_uid,
+    )
     if existing is None:
         raise HTTPException(
             status_code=404,
@@ -171,9 +211,10 @@ async def delete_environment(environment_id: str):
     # FK doesn't cascade; deletion would otherwise leave orphan rows.
     in_use = await fetch_one(
         """SELECT id, status FROM sessions
-           WHERE environment_id = $1 AND status != 'terminated'
+           WHERE environment_id = $1 AND project_id = $2 AND status != 'terminated'
            LIMIT 1""",
         uid,
+        project_uid,
     )
     if in_use is not None:
         raise HTTPException(
@@ -190,4 +231,9 @@ async def delete_environment(environment_id: str):
             },
         )
 
-    await execute("DELETE FROM environments WHERE id = $1", uid)
+    await execute(
+        "DELETE FROM environments WHERE id = $1 AND project_id = $2",
+        uid,
+        project_uid,
+    )
+    await record_audit("environment.deleted", "environment", environment_id, ctx=ctx)

@@ -15,6 +15,7 @@ import uuid as _uuid
 
 from cryptography.fernet import InvalidToken
 
+from app.audit import record_audit
 from app.db import fetch_one
 from app.encryption import get_encryption_service
 
@@ -39,7 +40,7 @@ class CredentialResolver:
                 continue
             row = await fetch_one(
                 """
-                SELECT encrypted_secrets FROM credentials
+                SELECT id, encrypted_secrets FROM credentials
                 WHERE vault_id = $1
                   AND credential_type = 'api_key'
                   AND provider = $2
@@ -53,6 +54,10 @@ class CredentialResolver:
                     enc_svc = get_encryption_service()
                     plaintext = enc_svc.decrypt(row["encrypted_secrets"])
                     secrets = json.loads(plaintext)
+                    await record_audit(
+                        "credential.resolved", "credential", str(row["id"]),
+                        detail={"vault_id": vault_id, "provider": provider},
+                    )
                     return secrets.get("api_key")
                 except (InvalidToken, Exception) as exc:
                     logger.error(
@@ -80,7 +85,7 @@ class CredentialResolver:
                 continue
             row = await fetch_one(
                 """
-                SELECT credential_type, encrypted_secrets FROM credentials
+                SELECT id, credential_type, encrypted_secrets FROM credentials
                 WHERE vault_id = $1
                   AND mcp_server_url = $2
                   AND archived_at IS NULL
@@ -96,11 +101,19 @@ class CredentialResolver:
                     cred_type = row["credential_type"]
 
                     if cred_type == "bearer_token":
+                        await record_audit(
+                            "credential.resolved", "credential", str(row["id"]),
+                            detail={"vault_id": vault_id, "mcp_server_url": mcp_server_url},
+                        )
                         return {
                             "auth_type": "bearer_token",
                             "token": secrets.get("token"),
                         }
                     elif cred_type == "oauth":
+                        await record_audit(
+                            "credential.resolved", "credential", str(row["id"]),
+                            detail={"vault_id": vault_id, "mcp_server_url": mcp_server_url},
+                        )
                         return {
                             "auth_type": "oauth",
                             "access_token": secrets.get("access_token"),
