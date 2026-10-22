@@ -14,6 +14,8 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import StatusBadge from '../components/StatusBadge';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { TIMEZONES } from '../lib/timezones';
+import { isValidCronExpr } from '../lib/cron';
 import './DeploymentDetailView.css';
 
 export default function DeploymentDetailView() {
@@ -38,6 +40,8 @@ export default function DeploymentDetailView() {
   const [editCron, setEditCron] = useState('');
   const [editTimezone, setEditTimezone] = useState('');
   const [editEventsJson, setEditEventsJson] = useState('');
+
+  const editCronInvalid = editCron.trim() !== '' && !isValidCronExpr(editCron);
 
   const fetchRuns = useCallback(async () => {
     setRunsLoading(true);
@@ -114,6 +118,10 @@ export default function DeploymentDetailView() {
 
   const handleEditSave = async () => {
     if (!deployment || saving) return;
+    if (editCronInvalid) {
+      setActionError('Invalid cron expression — expected 5 space-separated fields, e.g. 0 9 * * 1-5.');
+      return;
+    }
     setSaving(true);
     setActionError(null);
 
@@ -290,18 +298,30 @@ export default function DeploymentDetailView() {
               <span className="edit-field-hint">
                 Changing the schedule recomputes the next run time from now.
               </span>
+              {editCronInvalid && (
+                <div className="form-error" role="alert" data-testid="deployment-edit-cron-error">
+                  Invalid cron expression — expected 5 space-separated fields, e.g. 0 9 * * 1-5.
+                </div>
+              )}
             </div>
             <div className="edit-field">
               <label htmlFor="dep-edit-timezone">Timezone</label>
-              <input
+              <select
                 id="dep-edit-timezone"
-                type="text"
                 value={editTimezone}
                 onChange={(e) => setEditTimezone(e.target.value)}
-                placeholder="America/New_York"
                 data-testid="deployment-edit-timezone"
-              />
-              <span className="edit-field-hint">IANA timezone name, e.g. Asia/Shanghai.</span>
+              >
+                {editTimezone && !TIMEZONES.includes(editTimezone) && (
+                  <option value={editTimezone}>{editTimezone}</option>
+                )}
+                {TIMEZONES.map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz}
+                  </option>
+                ))}
+              </select>
+              <span className="edit-field-hint">IANA timezone used to evaluate the cron schedule.</span>
             </div>
             <div className="edit-field">
               <label htmlFor="dep-edit-events">Initial Events (JSON)</label>
@@ -322,7 +342,7 @@ export default function DeploymentDetailView() {
               <button
                 className="btn-save"
                 onClick={handleEditSave}
-                disabled={saving}
+                disabled={saving || editCronInvalid}
                 data-testid="deployment-edit-save"
               >
                 {saving ? 'Saving…' : 'Save'}

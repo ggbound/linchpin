@@ -11,6 +11,25 @@ interface QuotaDraft {
   budget: string;
 }
 
+// Mirrors the backend's centralized scope enforcement (app/auth.py
+// _check_scopes): mutating requests to /v1/{resource}/... require
+// "{resource}:write" or "*".
+const SCOPE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '*', label: '* (full access)' },
+  { value: 'agents:write', label: 'agents' },
+  { value: 'sessions:write', label: 'sessions' },
+  { value: 'environments:write', label: 'environments' },
+  { value: 'memory_stores:write', label: 'memory stores' },
+  { value: 'vaults:write', label: 'vaults' },
+  { value: 'deployments:write', label: 'deployments' },
+  { value: 'webhook_endpoints:write', label: 'webhook endpoints' },
+  { value: 'skills:write', label: 'skills' },
+  { value: 'dreams:write', label: 'dreams' },
+  { value: 'files:write', label: 'files' },
+  { value: 'artifacts:write', label: 'artifacts' },
+  { value: 'executor-nodes:write', label: 'executor nodes' },
+];
+
 export default function ApiKeysView() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -20,7 +39,7 @@ export default function ApiKeysView() {
   // Create form
   const [name, setName] = useState('');
   const [projectId, setProjectId] = useState('');
-  const [scopesInput, setScopesInput] = useState('*');
+  const [scopesSelected, setScopesSelected] = useState<string[]>(['*']);
   const [rpmInput, setRpmInput] = useState('');
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -72,10 +91,14 @@ export default function ApiKeysView() {
     setFormError(null);
     setQuotaNotice(null);
 
-    const scopes = scopesInput.split(',').map(s => s.trim()).filter(Boolean);
+    const scopes = scopesSelected;
     const rpm = rpmInput.trim() ? Number(rpmInput.trim()) : null;
     if (rpm !== null && (!Number.isFinite(rpm) || rpm <= 0)) {
       setFormError('Rate limit must be a positive number (requests per minute).');
+      return;
+    }
+    if (scopes.length === 0) {
+      setFormError('Select at least one scope.');
       return;
     }
 
@@ -92,7 +115,7 @@ export default function ApiKeysView() {
       setKeyCopied(false);
       setName('');
       setProjectId('');
-      setScopesInput('*');
+      setScopesSelected(['*']);
       setRpmInput('');
     } catch (err) {
       const apiErr = err as ApiError;
@@ -261,16 +284,34 @@ export default function ApiKeysView() {
             </div>
           </div>
           <div className="apikey-form-row">
-            <div className="apikey-form-field">
-              <label htmlFor="apikey-scopes">Scopes (comma-separated)</label>
-              <input
-                id="apikey-scopes"
-                type="text"
-                value={scopesInput}
-                onChange={e => setScopesInput(e.target.value)}
-                placeholder="*"
-                data-testid="apikey-create-scopes"
-              />
+            <div className="apikey-form-field apikey-scopes-field">
+              <span className="apikey-form-field-label">Scopes</span>
+              <div className="scope-checks" role="group" aria-label="Scopes" data-testid="apikey-create-scopes">
+                {SCOPE_OPTIONS.map(opt => (
+                  <label key={opt.value} className="scope-check">
+                    <input
+                      type="checkbox"
+                      checked={scopesSelected.includes(opt.value)}
+                      onChange={e =>
+                        setScopesSelected(prev =>
+                          e.target.checked
+                            ? [...prev, opt.value]
+                            : prev.filter(s => s !== opt.value),
+                        )
+                      }
+                    />
+                    <span>{opt.label}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="apikey-scopes-hint">
+                Read requests are always allowed; write scopes gate mutations.
+              </p>
+              {scopesSelected.length === 0 && (
+                <div className="form-error" role="alert" data-testid="apikey-scopes-error">
+                  Select at least one scope.
+                </div>
+              )}
             </div>
             <div className="apikey-form-field">
               <label htmlFor="apikey-rpm">Rate limit (RPM, optional)</label>
@@ -293,7 +334,7 @@ export default function ApiKeysView() {
           <button
             type="submit"
             className="btn-primary apikey-create-submit"
-            disabled={creating}
+            disabled={creating || scopesSelected.length === 0}
             data-testid="apikey-create-submit"
           >
             {creating ? 'Creating…' : 'Create key'}

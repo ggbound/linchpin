@@ -4,6 +4,7 @@ import { apiClient, ApiError } from '../api/client';
 import type { Dream, DreamStatus, DreamListResponse, Agent, MemoryStore, PaginatedResponse } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
+import ConfirmDialog from '../components/ConfirmDialog';
 import './DreamListView.css';
 
 interface StoreListResponse {
@@ -31,6 +32,7 @@ export default function DreamListView() {
   const [error, setError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Dream | null>(null);
 
   const fetchDreams = useCallback(async () => {
     try {
@@ -64,9 +66,11 @@ export default function DreamListView() {
     ]).finally(() => setLoading(false));
   }, [fetchDreams]);
 
-  const handleCancel = async (dream: Dream) => {
+  const handleCancel = async (dream: Dream | null) => {
+    if (!dream) return;
     setActionError(null);
     setCancelingId(dream.id);
+    setCancelTarget(null);
     try {
       const updated = await apiClient.post<Dream>(`/v1/dreams/${dream.id}/cancel`, {});
       setDreams(prev => prev.map(d => (d.id === dream.id ? updated : d)));
@@ -213,7 +217,7 @@ export default function DreamListView() {
                         <button
                           className="btn-sm-secondary"
                           disabled={cancelingId === dream.id}
-                          onClick={() => handleCancel(dream)}
+                          onClick={() => setCancelTarget(dream)}
                           data-testid="dream-cancel-btn"
                         >
                           {cancelingId === dream.id ? 'Canceling…' : 'Cancel'}
@@ -227,6 +231,18 @@ export default function DreamListView() {
           </tbody>
         </table>
       </div>
+
+      <ConfirmDialog
+        open={cancelTarget !== null}
+        title="Cancel Dream"
+        message={
+          cancelTarget
+            ? `Cancel "${cancelTarget.output_store_name}"? The dreamer session will be terminated and no output store will be produced.`
+            : ''
+        }
+        onConfirm={() => handleCancel(cancelTarget)}
+        onCancel={() => setCancelTarget(null)}
+      />
     </div>
   );
 }

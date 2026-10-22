@@ -3,7 +3,22 @@ import { Link, useNavigate } from 'react-router-dom';
 import { apiClient, ApiError, extractValidationErrors, FieldValidationError } from '../api/client';
 import type { Agent, CreateAgentRequest, ModelConfig, MCPServerConfig, SubagentConfig } from '../types';
 import SubagentEditor from '../components/SubagentEditor';
+import SkillsPicker from '../components/SkillsPicker';
 import './AgentCreateForm.css';
+
+// Builtin tool names accepted by the orchestrator (see linchpin-api tools registry).
+const BUILTIN_TOOL_NAMES = [
+  'bash',
+  'read',
+  'write',
+  'edit',
+  'glob',
+  'grep',
+  'web_fetch',
+  'web_search',
+] as const;
+
+const MAX_SKILLS = 8; // MAX_SKILLS_PER_AGENT
 
 interface ToolEntry {
   type: 'builtin' | 'custom';
@@ -30,7 +45,6 @@ export default function AgentCreateForm() {
   const [systemPrompt, setSystemPrompt] = useState('');
 
   // Skills (max 8, unique — MAX_SKILLS_PER_AGENT)
-  const [skillInput, setSkillInput] = useState('');
   const [skills, setSkills] = useState<string[]>([]);
 
   // Dynamic tools
@@ -46,20 +60,6 @@ export default function AgentCreateForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<FieldValidationError[]>([]);
-
-  // --- Skill helpers ---
-  const MAX_SKILLS = 8;
-
-  const addSkill = () => {
-    const s = skillInput.trim();
-    if (!s || skills.includes(s) || skills.length >= MAX_SKILLS) return;
-    setSkills([...skills, s]);
-    setSkillInput('');
-  };
-
-  const removeSkill = (s: string) => {
-    setSkills(skills.filter((x) => x !== s));
-  };
 
   // --- Tool helpers ---
   const addTool = () => {
@@ -355,47 +355,11 @@ export default function AgentCreateForm() {
         <section className="form-section">
           <h2>Skills</h2>
           <p className="section-hint">
-            Skill bundle names installed on this agent (upload bundles on the Skills page). Max {MAX_SKILLS}.
+            Pick skill bundles from the library to install on this agent (upload bundles on the
+            Skills page). Max {MAX_SKILLS}.
           </p>
           {renderFieldErrors('skills')}
-          <div className="skill-chip-row" data-testid="skills-editor">
-            {skills.map((s) => (
-              <span key={s} className="skill-chip">
-                {s}
-                <button
-                  type="button"
-                  className="skill-chip-remove"
-                  onClick={() => removeSkill(s)}
-                  aria-label={`Remove ${s}`}
-                >
-                  ✕
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="skill-input-row">
-            <input
-              type="text"
-              value={skillInput}
-              onChange={(e) => setSkillInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  addSkill();
-                }
-              }}
-              placeholder="skill-name"
-              disabled={skills.length >= MAX_SKILLS}
-            />
-            <button
-              type="button"
-              className="btn-add-sm"
-              onClick={addSkill}
-              disabled={!skillInput.trim() || skills.includes(skillInput.trim()) || skills.length >= MAX_SKILLS}
-            >
-              + Add Skill
-            </button>
-          </div>
+          <SkillsPicker value={skills} onChange={setSkills} testIdPrefix="skills-editor" max={MAX_SKILLS} />
         </section>
 
         {/* Tools */}
@@ -418,12 +382,26 @@ export default function AgentCreateForm() {
                   </div>
                   <div className="form-field">
                     <label>Name</label>
-                    <input
-                      type="text"
-                      value={tool.name}
-                      onChange={(e) => updateTool(idx, 'name', e.target.value)}
-                      placeholder="Tool name"
-                    />
+                    {tool.type === 'builtin' ? (
+                      <select
+                        value={tool.name}
+                        onChange={(e) => updateTool(idx, 'name', e.target.value)}
+                      >
+                        <option value="">Select tool…</option>
+                        {BUILTIN_TOOL_NAMES.map((n) => (
+                          <option key={n} value={n}>
+                            {n}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={tool.name}
+                        onChange={(e) => updateTool(idx, 'name', e.target.value)}
+                        placeholder="Tool name"
+                      />
+                    )}
                   </div>
                   <div className="form-field">
                     <label>Permission</label>

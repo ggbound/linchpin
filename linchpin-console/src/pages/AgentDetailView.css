@@ -408,7 +408,8 @@
   max-width: 320px;
 }
 
-.skill-input-row input {
+.skill-input-row input,
+.skill-input-row select {
   flex: 1;
   padding: var(--spacing-xs) var(--spacing-sm);
   font-size: 0.75rem;
@@ -419,7 +420,8 @@
   color: var(--color-text-primary);
 }
 
-.skill-input-row input:focus {
+.skill-input-row input:focus,
+.skill-input-row select:focus {
   outline: none;
   border-color: var(--color-primary);
 }

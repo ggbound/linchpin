@@ -26,6 +26,10 @@ function formatRelativeTime(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
+// Search only filters already-loaded rows; a full session ID pasted from
+// elsewhere won't match anything. Offer a direct jump for that case.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export default function SessionListView() {
   const navigate = useNavigate();
 
@@ -184,7 +188,22 @@ export default function SessionListView() {
             {filtered.length === 0 ? (
               <tr>
                 <td colSpan={5} className="empty-row">
-                  {searchQuery ? 'No sessions match your search.' : 'No sessions yet.'}
+                  {searchQuery ? (
+                    <>
+                      No sessions match your search.{' '}
+                      {UUID_RE.test(searchQuery.trim()) && (
+                        <button
+                          className="session-jump-btn"
+                          data-testid="session-jump-btn"
+                          onClick={() => navigate(`/sessions/${searchQuery.trim()}`)}
+                        >
+                          Open “{searchQuery.trim().slice(0, 8)}…”
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    'No sessions yet.'
+                  )}
                 </td>
               </tr>
             ) : (

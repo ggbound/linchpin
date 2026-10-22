@@ -6,6 +6,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import ConfirmDialog from '../components/ConfirmDialog';
 import SubagentEditor from '../components/SubagentEditor';
+import SkillsPicker from '../components/SkillsPicker';
 import './AgentDetailView.css';
 
 const MAX_SKILLS = 8;
@@ -29,7 +30,6 @@ export default function AgentDetailView() {
   const [editBaseUrl, setEditBaseUrl] = useState('');
   const [editSystem, setEditSystem] = useState('');
   const [editSkills, setEditSkills] = useState<string[]>([]);
-  const [editSkillInput, setEditSkillInput] = useState('');
   const [editSubagents, setEditSubagents] = useState<SubagentConfig[]>([]);
 
   // Archive state
@@ -77,7 +77,6 @@ export default function AgentDetailView() {
     setEditBaseUrl(agent.model.base_url || '');
     setEditSystem(agent.system);
     setEditSkills([...agent.skills]);
-    setEditSkillInput('');
     setEditSubagents(agent.multi_agents.map((s) => ({ ...s })));
     setSaveError(null);
     setEditing(true);
@@ -86,13 +85,6 @@ export default function AgentDetailView() {
   const cancelEdit = () => {
     setEditing(false);
     setSaveError(null);
-  };
-
-  const addEditSkill = () => {
-    const s = editSkillInput.trim();
-    if (!s || editSkills.includes(s) || editSkills.length >= MAX_SKILLS) return;
-    setEditSkills([...editSkills, s]);
-    setEditSkillInput('');
   };
 
   const handleSave = async () => {
@@ -369,57 +361,16 @@ export default function AgentDetailView() {
       <section className="detail-section" data-testid="skills-section">
         <h2>Skills</h2>
         <p className="section-hint">
-          Skill bundle names installed on this agent (upload bundles on the Skills page). Max {MAX_SKILLS}.
+          Skill bundles installed on this agent, picked from the library (upload bundles on the
+          Skills page). Max {MAX_SKILLS}.
         </p>
         {editing ? (
-          <>
-            {editSkills.length > 0 && (
-              <div className="skill-chip-row" data-testid="skills-editor">
-                {editSkills.map((s) => (
-                  <span key={s} className="skill-chip">
-                    {s}
-                    <button
-                      type="button"
-                      className="skill-chip-remove"
-                      onClick={() => setEditSkills(editSkills.filter((x) => x !== s))}
-                      aria-label={`Remove ${s}`}
-                    >
-                      ✕
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-            <div className="skill-input-row">
-              <input
-                type="text"
-                value={editSkillInput}
-                onChange={(e) => setEditSkillInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addEditSkill();
-                  }
-                }}
-                placeholder="skill-name"
-                disabled={editSkills.length >= MAX_SKILLS}
-                data-testid="edit-skill-input"
-              />
-              <button
-                type="button"
-                className="btn-add-sm"
-                onClick={addEditSkill}
-                disabled={
-                  !editSkillInput.trim() ||
-                  editSkills.includes(editSkillInput.trim()) ||
-                  editSkills.length >= MAX_SKILLS
-                }
-                data-testid="edit-skill-add"
-              >
-                Add
-              </button>
-            </div>
-          </>
+          <SkillsPicker
+            value={editSkills}
+            onChange={setEditSkills}
+            testIdPrefix="skills-editor"
+            max={MAX_SKILLS}
+          />
         ) : agent.skills.length === 0 ? (
           <p className="empty-text">No skills installed.</p>
         ) : (

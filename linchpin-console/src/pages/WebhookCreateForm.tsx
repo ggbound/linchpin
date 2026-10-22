@@ -83,7 +83,7 @@ export default function WebhookCreateForm() {
           <label htmlFor="webhook-url">URL</label>
           <input
             id="webhook-url"
-            type="text"
+            type="url"
             value={url}
             onChange={e => setUrl(e.target.value)}
             placeholder="https://example.com/hooks/linchpin"

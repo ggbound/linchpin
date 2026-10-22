@@ -9,6 +9,17 @@ import './ExecutorNodeListView.css';
 // The registration response carries the daemon token exactly once.
 type ExecutorNodeCreatedResponse = ExecutorNode & { token: string };
 
+// The dialog uses a click handler instead of a <form> submit, so there is no
+// native URL validation — mirror it in JS.
+function isValidHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 export default function ExecutorNodeListView() {
   const [nodes, setNodes] = useState<ExecutorNode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,6 +36,9 @@ export default function ExecutorNodeListView() {
 
   // One-time token banner after successful registration
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
+
+  const newUrlTrimmed = newUrl.trim();
+  const newUrlInvalid = newUrlTrimmed !== '' && !isValidHttpUrl(newUrlTrimmed);
 
   // Delete
   const [deleteTarget, setDeleteTarget] = useState<ExecutorNode | null>(null);
@@ -48,6 +62,10 @@ export default function ExecutorNodeListView() {
 
   const handleCreate = async () => {
     if (!newName.trim() || !newUrl.trim()) return;
+    if (newUrlInvalid) {
+      setCreateError('Daemon URL must be a valid http(s) URL, e.g. http://10.0.0.8:8100.');
+      return;
+    }
     setCreating(true);
     setCreateError(null);
     try {
@@ -237,12 +255,18 @@ export default function ExecutorNodeListView() {
               <label htmlFor="node-create-url">Daemon URL</label>
               <input
                 id="node-create-url"
+                type="url"
                 value={newUrl}
                 onChange={e => setNewUrl(e.target.value)}
                 placeholder="http://10.0.0.8:8100"
                 data-testid="node-create-url"
               />
             </div>
+            {newUrlInvalid && (
+              <div className="form-error" role="alert" data-testid="node-create-url-error">
+                Daemon URL must be a valid http(s) URL, e.g. http://10.0.0.8:8100.
+              </div>
+            )}
             <div className="form-field">
               <label htmlFor="node-create-max-sessions">Max concurrent sessions</label>
               <input
@@ -268,7 +292,7 @@ export default function ExecutorNodeListView() {
               </button>
               <button
                 className="btn-primary"
-                disabled={creating || !newName.trim() || !newUrl.trim()}
+                disabled={creating || !newName.trim() || !newUrl.trim() || newUrlInvalid}
                 onClick={handleCreate}
                 data-testid="node-create-submit"
               >

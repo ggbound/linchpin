@@ -347,6 +347,29 @@ cd ../linchpin-sdk-ts   && npm install && npm test
 cd ../linchpin-sdk-py   && pip install -e ".[dev]" && pytest
 ```
 
+### Running the API without Docker
+
+On hosts without a Docker daemon, set `LINCHPIN_SKIP_DOCKER=true` to skip all Docker wiring — metadata/admin endpoints, auth, persistence, and SSE all work, but session launch fails with `503 sandbox_runtime_unavailable`.
+
+```bash
+# API (no Docker) — all vars required unless noted
+export DATABASE_URL="postgresql://linchpin:linchpin@localhost:5432/linchpin"  # required at startup
+export LINCHPIN_API_KEY="lpk_local_dev"                                      # bootstrap bearer token
+export LINCHPIN_SKIP_DOCKER=true
+
+# Storage roots — default to /var/lib/linchpin/*, which is not writable
+# on macOS dev machines; point them anywhere writable
+export LINCHPIN_MEMORY_ROOT=/tmp/linchpin/memory_stores
+export LINCHPIN_FILES_ROOT=/tmp/linchpin/files
+export LINCHPIN_SKILLS_ROOT=/tmp/linchpin/skills
+export LINCHPIN_GIT_CACHE_ROOT=/tmp/linchpin/git_cache
+
+alembic upgrade head
+uvicorn app.main:app --reload
+```
+
+Without `LINCHPIN_SKIP_DOCKER=true`, startup fails when the Docker daemon is unreachable (network pre-creation) and session creation fails on container provision. `VAULT_ENCRYPTION_KEY` remains optional in this mode: without it the API logs a warning and vault/executor-node credential features are disabled.
+
 ## How it works
 
 One POST creates a sandbox; from there the orchestrator loop turns events into model calls and tool executions, streaming everything back over SSE:

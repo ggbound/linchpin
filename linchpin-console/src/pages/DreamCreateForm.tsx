@@ -59,6 +59,10 @@ export default function DreamCreateForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (since && until && new Date(since) > new Date(until)) {
+      setCreateError('"Since" must be earlier than or equal to "Until".');
+      return;
+    }
     setCreating(true);
     setCreateError(null);
 

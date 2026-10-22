@@ -4,6 +4,8 @@ import { apiClient, ApiError } from '../api/client';
 import type { Agent, Environment, Deployment, InitialEventConfig, PaginatedResponse } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
+import { TIMEZONES } from '../lib/timezones';
+import { isValidCronExpr } from '../lib/cron';
 import './DeploymentCreateForm.css';
 
 interface EventRow {
@@ -59,8 +61,14 @@ export default function DeploymentCreateForm() {
     setEventRows(prev => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   };
 
+  const cronInvalid = cron.trim() !== '' && !isValidCronExpr(cron);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (cronInvalid) {
+      setCreateError('Invalid cron expression — expected 5 space-separated fields, e.g. 0 9 * * 1-5.');
+      return;
+    }
     setCreating(true);
     setCreateError(null);
 
@@ -164,18 +172,28 @@ export default function DeploymentCreateForm() {
               5-field cron: minute hour day month weekday — e.g. <code>0 9 * * 1-5</code> runs
               weekdays at 09:00.
             </p>
+            {cronInvalid && (
+              <div className="form-error" role="alert" data-testid="dep-cron-error">
+                Invalid cron expression — expected 5 space-separated fields, e.g. 0 9 * * 1-5.
+              </div>
+            )}
           </div>
           <div className="form-field">
             <label htmlFor="dep-timezone">Timezone</label>
-            <input
+            <select
               id="dep-timezone"
-              type="text"
               value={timezone}
               onChange={e => setTimezone(e.target.value)}
-              placeholder="UTC"
               data-testid="dep-timezone-input"
-            />
-            <p className="section-hint">IANA name, e.g. UTC, Asia/Shanghai, America/New_York.</p>
+            >
+              {timezone && !TIMEZONES.includes(timezone) && (
+                <option value={timezone}>{timezone}</option>
+              )}
+              {TIMEZONES.map(tz => (
+                <option key={tz} value={tz}>{tz}</option>
+              ))}
+            </select>
+            <p className="section-hint">IANA timezone used to evaluate the cron schedule.</p>
           </div>
         </div>
 
@@ -234,7 +252,7 @@ export default function DeploymentCreateForm() {
           <button
             type="submit"
             className="btn-primary"
-            disabled={creating || !agentId || !environmentId || !cron.trim()}
+            disabled={creating || !agentId || !environmentId || !cron.trim() || cronInvalid}
             data-testid="deployment-create-submit"
           >
             {creating ? 'Creating…' : 'Create deployment'}

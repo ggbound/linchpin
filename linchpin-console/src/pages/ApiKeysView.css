@@ -113,6 +113,43 @@
   max-width: 360px;
 }
 
+.apikey-scopes-field {
+  flex-basis: 100%;
+}
+
+.apikey-form-field-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.scope-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs) var(--spacing-sm);
+}
+
+/* Later than `.apikey-form-field label` so checkbox chips stay light. */
+.apikey-form-field .scope-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.scope-check input[type='checkbox'] {
+  accent-color: var(--color-primary);
+}
+
+.apikey-scopes-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
 .apikey-create-submit {
   align-self: flex-start;
   padding: 8px 20px;
