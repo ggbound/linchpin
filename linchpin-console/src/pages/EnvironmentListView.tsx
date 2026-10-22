@@ -103,14 +103,15 @@ export default function EnvironmentListView() {
             <tr>
               <th>ID</th>
               <th>Name</th>
-              <th>Networking Type</th>
+              <th>Spec</th>
+              <th>Networking</th>
               <th>Created</th>
             </tr>
           </thead>
           <tbody>
             {environments.length === 0 ? (
               <tr>
-                <td colSpan={4} className="empty-row">
+                <td colSpan={5} className="empty-row">
                   No environments yet.
                 </td>
               </tr>
@@ -131,7 +132,12 @@ export default function EnvironmentListView() {
                     <code>{env.id}</code>
                   </td>
                   <td data-testid="environment-cell-name">{env.name}</td>
-                  <td data-testid="environment-cell-networking">{env.config.networking.type}</td>
+                  <td data-testid="environment-cell-spec">
+                    <code className="spec-badge">{env.config.resources.tier}</code>
+                  </td>
+                  <td data-testid="environment-cell-networking">
+                    {env.config.networking.type}
+                  </td>
                   <td data-testid="environment-cell-created">
                     {formatRelativeTime(env.created_at)}
                   </td>

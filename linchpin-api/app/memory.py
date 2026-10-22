@@ -110,6 +110,10 @@ class MemoryWriter:
         """Create or update a memory at *path*. Always produces a new
         version row; never overwrites bytes in place."""
         path = validate_memory_path(path)
+        if isinstance(content, str):
+            # HTTP callers pass the decoded JSON string; the sandbox
+            # watcher passes bytes. Normalize to bytes before hashing.
+            content = content.encode("utf-8")
         if len(content) > MEMORY_MAX_BYTES_PER_MEMORY:
             raise ValueError(
                 f"content size {len(content)} exceeds cap "

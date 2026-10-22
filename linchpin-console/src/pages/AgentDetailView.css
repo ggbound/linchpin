@@ -297,3 +297,213 @@
   color: var(--color-text-muted);
   font-size: 0.8125rem;
 }
+
+/* Archived state */
+.archived-badge {
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(142, 142, 147, 0.15);
+  color: var(--color-text-secondary);
+  border-radius: 999px;
+}
+
+.btn-archive {
+  padding: 4px 14px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border: 1px solid var(--color-danger, #e53935);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-danger, #e53935);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-archive:hover:not(:disabled) {
+  background: rgba(229, 57, 53, 0.08);
+}
+
+.btn-archive:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Description */
+.edit-description-textarea {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary, #fff);
+  color: var(--color-text-primary);
+  resize: vertical;
+  font-family: inherit;
+}
+
+.description-text {
+  font-size: 0.875rem;
+  color: var(--color-text-primary);
+  line-height: 1.6;
+}
+
+/* Section hint */
+.section-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin: calc(var(--spacing-xs) * -1) 0 var(--spacing-sm);
+}
+
+/* Skills chips */
+.skill-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-sm);
+}
+
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 2px var(--spacing-sm);
+  font-size: 0.75rem;
+  font-family: var(--font-mono, monospace);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: 999px;
+}
+
+.skill-chip-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.skill-chip-link:hover {
+  text-decoration: underline;
+}
+
+.skill-chip-remove {
+  padding: 0 2px;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.skill-chip-remove:hover {
+  color: var(--color-danger, #e53935);
+}
+
+.skill-input-row {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+  max-width: 320px;
+}
+
+.skill-input-row input {
+  flex: 1;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 0.75rem;
+  font-family: var(--font-mono, monospace);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary, #fff);
+  color: var(--color-text-primary);
+}
+
+.skill-input-row input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.btn-add-sm {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-primary);
+  background: none;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.btn-add-sm:hover:not(:disabled) {
+  border-color: var(--color-primary);
+}
+
+.btn-add-sm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Subagents list (view mode) */
+.subagents-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.subagent-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+}
+
+.subagent-name {
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+}
+
+.subagent-link {
+  color: var(--color-primary);
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+.subagent-link:hover {
+  text-decoration: underline;
+}
+
+.subagent-description {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+}
+
+/* Version history table */
+.versions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.versions-table th {
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.versions-table td {
+  padding: var(--spacing-sm);
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.versions-table td code {
+  font-size: 0.75rem;
+}

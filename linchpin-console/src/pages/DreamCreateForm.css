@@ -1,0 +1,113 @@
+.dream-create-view {
+  padding: var(--spacing-xl);
+  max-width: 760px;
+}
+
+.dream-create-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: var(--spacing-xs);
+}
+
+.dream-create-subtitle {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-xl);
+  max-width: 560px;
+  line-height: 1.5;
+}
+
+.dream-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.dream-form-row {
+  display: flex;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+}
+
+.dream-form-row .form-field {
+  flex: 1;
+  min-width: 220px;
+}
+
+.dream-form .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.dream-form label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.dream-form select,
+.dream-form input {
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: 0.8125rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+}
+
+.dream-form select:focus,
+.dream-form input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.dream-form .section-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.dream-form .section-hint code {
+  font-size: 0.6875rem;
+}
+
+.dream-filter-section {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.dream-filter-section h2 {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.dream-filter-section > .section-hint {
+  margin-top: calc(-1 * var(--spacing-sm));
+}
+
+.dream-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.btn-cancel-link {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.btn-cancel-link:hover {
+  color: var(--color-text-primary);
+}
+
+.form-error {
+  font-size: 0.75rem;
+  color: var(--color-danger);
+}

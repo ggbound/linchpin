@@ -1,0 +1,96 @@
+.webhook-create-view {
+  padding: var(--spacing-xl);
+  max-width: 760px;
+}
+
+.webhook-create-view h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: var(--spacing-md) 0 var(--spacing-xs);
+}
+
+.webhook-create-intro {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  margin-bottom: var(--spacing-lg);
+}
+
+.webhook-form-field {
+  margin-bottom: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.webhook-form-field label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.webhook-form-field input {
+  max-width: 480px;
+}
+
+.webhook-events-fieldset {
+  border: 1px solid var(--color-border);
+  padding: var(--spacing-md);
+  margin: 0 0 var(--spacing-md);
+  background: var(--color-bg-secondary);
+}
+
+.webhook-events-fieldset legend {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0 var(--spacing-xs);
+}
+
+.webhook-events-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--spacing-sm);
+}
+
+.webhook-events-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-xs) var(--spacing-md);
+}
+
+.webhook-event-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-xs);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.webhook-event-option input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.webhook-event-code {
+  display: block;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.webhook-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-lg);
+}
+
+.webhook-form-actions .btn-primary {
+  padding: 8px 20px;
+}
+
+.btn-cancel-link {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.btn-cancel-link:hover {
+  color: var(--color-text-primary);
+}

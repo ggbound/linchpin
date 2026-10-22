@@ -1836,6 +1836,7 @@ _SKILL_NAME_RESERVED = frozenset({"anthropic", "claude", "linchpin"})
 
 SKILL_NAME_MAX_LEN = 64
 SKILL_DESCRIPTION_MAX_LEN = 1024
+SKILL_VERSION_MAX_LEN = 64
 SKILL_BUNDLE_MAX_BYTES = 10 * 1024 * 1024  # 10 MB cap per skill bundle
 
 
@@ -1868,13 +1869,14 @@ class Skill(BaseModel):
 
     The bundle bytes themselves (SKILL.md + scripts/resources) live on
     disk under ``LINCHPIN_SKILLS_ROOT`` — the row records only the
-    SKILL.md frontmatter (``name``, ``description``) plus the bundle's
-    content-addressable storage info.
+    SKILL.md frontmatter (``name``, ``description``, optional
+    ``version``) plus the bundle's content-addressable storage info.
     """
 
     id: str
     name: str
     description: str
+    version: str | None = None
     bundle_sha256: str
     bundle_size: int
     created_at: datetime
@@ -1888,6 +1890,20 @@ class SkillListResponse(BaseModel):
     data: list[Skill]
     has_more: bool
     next_cursor: str | None = None
+
+
+class SkillPreflightResponse(BaseModel):
+    """Metadata extracted from a bundle *without* persisting it.
+
+    Used by the console before an upload proceeds: ``replaces`` is the
+    live skill that a same-name upload would overwrite (upsert), or
+    ``None`` when the upload would be a fresh insert.
+    """
+
+    name: str
+    description: str
+    version: str | None = None
+    replaces: Skill | None = None
 
 
 # ---------------------------------------------------------------------------

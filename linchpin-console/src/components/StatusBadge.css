@@ -26,8 +26,8 @@
 }
 
 .status-badge--idle {
-  color: var(--color-text-secondary);
-  background: var(--color-bg-secondary);
+  color: var(--color-status-idle);
+  background: #2B6CB010;
 }
 
 .status-badge--rescheduling {

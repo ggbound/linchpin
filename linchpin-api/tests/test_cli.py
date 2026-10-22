@@ -44,7 +44,7 @@ def test_build_bundle_produces_valid_archive(tmp_path):
     assert "SKILL.md" in names
     assert "scripts/run.sh" in names
     # And the API's parser accepts it.
-    name, desc = parse_skill_metadata(out.read_bytes())
+    name, desc, _version = parse_skill_metadata(out.read_bytes())
     assert name == "gh-pr"
     assert desc == "Test skill."
 

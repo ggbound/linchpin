@@ -1,0 +1,117 @@
+.deployment-list-view {
+  padding: var(--spacing-xl);
+}
+
+.deployment-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--spacing-lg);
+}
+
+.deployment-list-header h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: var(--spacing-xs);
+}
+
+.deployment-list-header p {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}
+
+.deployment-action-error {
+  font-size: 0.75rem;
+  color: var(--color-danger);
+  margin-bottom: var(--spacing-sm);
+}
+
+.deployment-table-wrapper {
+  overflow-x: auto;
+}
+
+.deployment-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.deployment-table thead th {
+  text-align: left;
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.deployment-table tbody td {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-text-primary);
+}
+
+.deployment-table td code {
+  font-size: 0.75rem;
+}
+
+.deployment-table .empty-row {
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: var(--spacing-lg);
+}
+
+.deployment-row {
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.deployment-row:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+.deployment-row:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.deployment-entity-link {
+  color: var(--color-primary);
+}
+
+.deployment-entity-link:hover {
+  text-decoration: underline;
+}
+
+.deployment-actions-cell {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.deployment-status {
+  display: inline-block;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.deployment-status--active {
+  background: rgba(56, 122, 87, 0.12);
+  color: #2e6a4c;
+}
+
+.deployment-status--paused {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
+.archived-badge {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border-radius: 999px;
+}

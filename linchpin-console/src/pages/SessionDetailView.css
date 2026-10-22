@@ -29,6 +29,24 @@
   font-weight: 600;
 }
 
+.session-rename-form {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.session-rename-input {
+  font-size: 1.25rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  width: 24rem;
+  max-width: 60vw;
+}
+
+.session-rename-btn {
+  flex-shrink: 0;
+}
+
 .session-detail-meta {
   display: flex;
   align-items: center;
@@ -167,4 +185,237 @@
   background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
   border-radius: 999px;
+}
+
+/* Generic data table (resources / threads / artifacts / filesystem) */
+.resources-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.resources-table th {
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.resources-table td {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--color-border-light);
+  vertical-align: top;
+}
+
+.resources-table tr:last-child td {
+  border-bottom: none;
+}
+
+.resources-table td code {
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+.empty-text {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+/* Resource mount state badges */
+.resource-state {
+  display: inline-block;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.resource-state--mounted {
+  background: rgba(56, 122, 87, 0.12);
+  color: #2e6a4c;
+}
+
+.resource-state--unmounted,
+.resource-state--unmounting {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
+.resource-state--failed {
+  background: rgba(184, 58, 26, 0.12);
+  color: var(--color-danger);
+}
+
+.resource-detail code {
+  font-size: 0.6875rem;
+  word-break: break-all;
+}
+
+/* Suffix info in a resource detail cell (e.g. memory-store access mode,
+ * git branch) — kept on one line so the cell stays scannable. */
+.resource-config-extra {
+  margin-left: var(--spacing-sm);
+  font-size: 0.6875rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.resource-detail a {
+  white-space: nowrap;
+}
+
+.resource-error {
+  font-size: 0.75rem;
+  color: var(--color-danger);
+}
+
+/* Download button */
+.btn-download {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-primary);
+  background: transparent;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-download:hover:not(:disabled) {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.btn-download:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Filesystem browser */
+.fs-breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-bottom: var(--spacing-sm);
+  font-size: 0.8125rem;
+}
+
+.fs-crumb {
+  padding: 2px 6px;
+  font-size: 0.8125rem;
+  font-family: var(--font-mono, monospace);
+  color: var(--color-primary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.fs-crumb:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.fs-crumb-sep {
+  color: var(--color-text-muted);
+  user-select: none;
+}
+
+.fs-dir-link {
+  color: var(--color-primary);
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.fs-dir-link:hover {
+  text-decoration: underline;
+  color: var(--color-primary-hover);
+}
+
+.fs-symlink-target {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+/* Outcome evaluations */
+.detail-section h2 .btn-refresh {
+  margin-left: var(--spacing-sm);
+  vertical-align: middle;
+}
+
+.eval-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  max-width: 560px;
+}
+
+.eval-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.eval-form-row label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.eval-form-row input,
+.eval-form-row textarea {
+  padding: 6px 10px;
+  font-size: 0.8125rem;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-bg-primary, #fff);
+  color: var(--color-text-primary);
+  resize: vertical;
+}
+
+.eval-form .btn-primary {
+  align-self: flex-start;
+  padding: 6px 16px;
+  font-size: 0.8125rem;
+}
+
+.eval-score {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.eval-score--high {
+  color: #2F855A;
+  background: rgba(47, 133, 90, 0.1);
+}
+
+.eval-score--low {
+  color: var(--color-primary);
+  background: rgba(184, 58, 26, 0.08);
+}
+
+.eval-rationale {
+  max-width: 320px;
+  word-break: break-word;
 }

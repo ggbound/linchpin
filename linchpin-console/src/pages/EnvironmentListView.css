@@ -58,3 +58,14 @@
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }
+
+/* Spec tier badge */
+.environment-list-table .spec-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 1px 8px;
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}

@@ -1,0 +1,98 @@
+.skill-list-view {
+  padding: var(--spacing-xl);
+}
+
+.skill-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--spacing-lg);
+  gap: var(--spacing-md);
+}
+
+.skill-list-header h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: var(--spacing-xs);
+}
+
+.skill-list-header p {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  max-width: 560px;
+}
+
+.skill-upload-area {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-shrink: 0;
+}
+
+.skill-file-input {
+  display: none;
+}
+
+.skill-list-header .btn-primary {
+  padding: 8px 18px;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.skill-notice {
+  border: 1px solid rgba(56, 122, 87, 0.4);
+  background: rgba(56, 122, 87, 0.08);
+  color: #2e6a4c;
+  font-size: 0.8125rem;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm, 4px);
+  margin-bottom: var(--spacing-md);
+}
+
+.skill-empty {
+  padding: var(--spacing-lg) 0;
+}
+
+.skill-search-input {
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: 0.8125rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  width: 280px;
+  margin-bottom: var(--spacing-md);
+}
+
+.skill-table-wrapper {
+  overflow-x: auto;
+}
+
+.skill-table {
+  font-size: 0.8125rem;
+}
+
+/* Rows navigate to the skill detail page. */
+.skill-table tbody tr.skill-row {
+  cursor: pointer;
+}
+
+.skill-table tbody tr.skill-row:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.skill-name-cell {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.skill-name-cell .archived-badge {
+  margin-left: var(--spacing-xs);
+}
+
+.skill-desc-cell {
+  max-width: 320px;
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+}

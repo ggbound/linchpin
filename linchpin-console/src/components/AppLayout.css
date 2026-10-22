@@ -5,6 +5,10 @@
 
 .app-main {
   flex: 1;
+  /* min-width: 0 lets this flex child shrink below its content's intrinsic
+     width so wide tables scroll inside their own wrappers instead of
+     stretching the page and sliding content under the fixed sidebar. */
+  min-width: 0;
   margin-left: 240px;
   padding: var(--spacing-xl);
   max-width: 100%;

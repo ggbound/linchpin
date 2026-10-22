@@ -194,6 +194,70 @@
   text-decoration: underline;
 }
 
+/* Section hint text */
+.section-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin: calc(var(--spacing-xs) * -1) 0 var(--spacing-sm);
+}
+
+/* Skills editor */
+.skill-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-sm);
+}
+
+.skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 2px var(--spacing-sm);
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: 999px;
+}
+
+.skill-chip-remove {
+  padding: 0 2px;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.skill-chip-remove:hover {
+  color: var(--color-danger);
+}
+
+.skill-input-row {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+  max-width: 320px;
+}
+
+.skill-input-row input {
+  flex: 1;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+}
+
+.skill-input-row input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
 /* Submit area */
 .form-actions {
   padding-top: var(--spacing-lg);
@@ -230,4 +294,35 @@
   border-radius: var(--radius-sm);
   color: var(--color-danger);
   font-size: 0.8125rem;
+}
+
+.form-error p {
+  margin: 0 0 var(--spacing-xs);
+}
+
+.form-error p:last-child {
+  margin-bottom: 0;
+}
+
+.form-error-list {
+  margin: var(--spacing-xs) 0 0;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+
+.form-error-list li {
+  margin: 2px 0;
+}
+
+/* Field-level validation errors (422), rendered inline near the relevant field */
+.field-error {
+  margin: var(--spacing-xs) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.75rem;
+  color: var(--color-danger);
+}
+
+.field-error li {
+  margin: 2px 0;
 }

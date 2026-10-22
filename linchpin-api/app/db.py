@@ -78,6 +78,19 @@ _tenant_project: ContextVar[str | None] = ContextVar(
 _guc_state: WeakKeyDictionary[asyncpg.Connection, str | None] = WeakKeyDictionary()
 
 
+def _guc_key(conn: asyncpg.Connection) -> asyncpg.Connection:
+    """Return the weak-referenceable object to key *conn* by.
+
+    ``pool.acquire()`` under ``async with`` hands out a PoolConnectionProxy,
+    which is ``__slots__``-based and cannot be weak-referenced (weakref on
+    it raises TypeError). The real Connection it delegates to is reachable
+    via its ``_con`` attribute and *is* weak-referenceable, so cache on
+    that instead — same lifetime semantics, since the proxy delegates
+    everything (including reset) to it.
+    """
+    return getattr(conn, "_con", None) or conn
+
+
 def set_tenant_context(project_id: str | None) -> None:
     """Pin the tenant project for all queries issued from this task.
 
@@ -89,7 +102,7 @@ def set_tenant_context(project_id: str | None) -> None:
 
 async def _apply_tenant_guc(conn: asyncpg.Connection, want: str | None) -> None:
     """Bring *conn*'s ``app.current_project`` GUC in line with *want*."""
-    have = _guc_state.get(conn)
+    have = _guc_state.get(_guc_key(conn))
     if want == have:
         return
     if want is None:
@@ -101,7 +114,7 @@ async def _apply_tenant_guc(conn: asyncpg.Connection, want: str | None) -> None:
         await conn.execute(
             "SELECT set_config('app.current_project', $1, false)", want
         )
-    _guc_state[conn] = want
+    _guc_state[_guc_key(conn)] = want
 
 
 async def _reset_tenant_guc(conn: asyncpg.Connection) -> None:
@@ -113,7 +126,7 @@ async def _reset_tenant_guc(conn: asyncpg.Connection) -> None:
     """
     try:
         await conn.execute("RESET app.current_project")
-        _guc_state[conn] = None
+        _guc_state[_guc_key(conn)] = None
     except Exception:
         pass
 

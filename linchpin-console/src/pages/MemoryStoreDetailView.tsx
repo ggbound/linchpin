@@ -1,0 +1,849 @@
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { apiClient, ApiError } from '../api/client';
+import type {
+  Memory,
+  MemoryStore,
+  MemoryVersion,
+  WriteMemoryRequest,
+} from '../types';
+import LoadingSpinner from '../components/LoadingSpinner';
+import ErrorMessage from '../components/ErrorMessage';
+import ConfirmDialog from '../components/ConfirmDialog';
+import './MemoryStoreDetailView.css';
+
+interface ListResponse<T> {
+  data: T[];
+  next_cursor: string | null;
+}
+
+function humanBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+export default function MemoryStoreDetailView() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+
+  const [store, setStore] = useState<MemoryStore | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Description editing
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descDraft, setDescDraft] = useState('');
+  const [savingDesc, setSavingDesc] = useState(false);
+
+  // Memories
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [memoriesLoading, setMemoriesLoading] = useState(true);
+  const [createMemoryOpen, setCreateMemoryOpen] = useState(false);
+  const [newPath, setNewPath] = useState('');
+  const [newContent, setNewContent] = useState('');
+  const [creatingMemory, setCreatingMemory] = useState(false);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+
+  // Expanded memory content (head version)
+  const [expandedPath, setExpandedPath] = useState<string | null>(null);
+  const [memoryContent, setMemoryContent] = useState<string | null>(null);
+  const [contentLoading, setContentLoading] = useState(false);
+  const [contentNote, setContentNote] = useState<string | null>(null);
+  const [editingMemory, setEditingMemory] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [savingMemory, setSavingMemory] = useState(false);
+
+  // Memory deletion
+  const [deleteMemoryTarget, setDeleteMemoryTarget] = useState<Memory | null>(null);
+
+  // Versions
+  const [versions, setVersions] = useState<MemoryVersion[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(true);
+  const [redactTarget, setRedactTarget] = useState<MemoryVersion | null>(null);
+  const [redactReason, setRedactReason] = useState('');
+  const [redacting, setRedacting] = useState(false);
+
+  const fetchStore = useCallback(async () => {
+    try {
+      setError(null);
+      const data = await apiClient.get<MemoryStore>(`/v1/memory_stores/${id}`);
+      setStore(data);
+    } catch (err) {
+      setError(err as ApiError);
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  const fetchMemories = useCallback(async () => {
+    setMemoriesLoading(true);
+    try {
+      const res = await apiClient.get<ListResponse<Memory>>(
+        `/v1/memory_stores/${id}/memories`,
+        { limit: '100' },
+      );
+      setMemories(res.data);
+      setMemoryError(null);
+    } catch (err) {
+      setMemoryError((err as ApiError).message || 'Failed to load memories');
+    } finally {
+      setMemoriesLoading(false);
+    }
+  }, [id]);
+
+  const fetchVersions = useCallback(async () => {
+    setVersionsLoading(true);
+    try {
+      const res = await apiClient.get<ListResponse<MemoryVersion>>(
+        `/v1/memory_stores/${id}/memory_versions`,
+        { limit: '20' },
+      );
+      setVersions(res.data);
+    } catch {
+      // Version list is supplementary — don't block the page on failure.
+      setVersions([]);
+    } finally {
+      setVersionsLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchStore();
+    fetchMemories();
+    fetchVersions();
+  }, [fetchStore, fetchMemories, fetchVersions]);
+
+  const handleArchive = async () => {
+    if (!store) return;
+    setShowArchiveConfirm(false);
+    setArchiving(true);
+    setActionError(null);
+    try {
+      const updated = await apiClient.post<MemoryStore>(
+        `/v1/memory_stores/${store.id}/archive`,
+        {},
+      );
+      setStore(updated);
+    } catch (err) {
+      setActionError((err as ApiError).message || 'Failed to archive memory store');
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!store) return;
+    setShowDeleteConfirm(false);
+    setDeleting(true);
+    setActionError(null);
+    try {
+      await apiClient.delete(`/v1/memory_stores/${store.id}`);
+      navigate('/memory-stores');
+    } catch (err) {
+      const apiErr = err as ApiError;
+      setActionError(
+        apiErr.status === 409
+          ? 'Cannot delete: a running session still has this store mounted. Terminate the session first, or archive the store instead.'
+          : apiErr.message || 'Failed to delete memory store',
+      );
+      setDeleting(false);
+    }
+  };
+
+  const handleSaveDesc = async () => {
+    if (!store) return;
+    setSavingDesc(true);
+    setActionError(null);
+    try {
+      const updated = await apiClient.patch<MemoryStore>(
+        `/v1/memory_stores/${store.id}`,
+        { description: descDraft },
+      );
+      setStore(updated);
+      setEditingDesc(false);
+    } catch (err) {
+      setActionError((err as ApiError).message || 'Failed to update description');
+    } finally {
+      setSavingDesc(false);
+    }
+  };
+
+  const openMemory = async (mem: Memory) => {
+    if (expandedPath === mem.path) {
+      setExpandedPath(null);
+      setMemoryContent(null);
+      setContentNote(null);
+      setEditingMemory(false);
+      return;
+    }
+    setExpandedPath(mem.path);
+    setMemoryContent(null);
+    setContentNote(null);
+    setEditingMemory(false);
+    setContentLoading(true);
+    try {
+      const res = await apiClient.get<ListResponse<MemoryVersion>>(
+        `/v1/memory_stores/${id}/memory_versions`,
+        { memory_id: mem.id, limit: '1' },
+      );
+      const head = res.data[0];
+      if (!head) {
+        setContentNote('No versions recorded for this memory.');
+      } else if (head.redacted_at) {
+        setContentNote('Content has been redacted and is no longer available.');
+      } else if (head.action === 'delete' || head.size_bytes === 0) {
+        setContentNote('(empty — memory was deleted)');
+      } else {
+        const blob = await apiClient.download(
+          `/v1/memory_stores/${id}/memory_versions/${head.id}/content`,
+        );
+        setMemoryContent(await blob.text());
+      }
+    } catch (err) {
+      const apiErr = err as ApiError;
+      setContentNote(
+        apiErr.status === 404
+          ? 'Content has been redacted and is no longer available.'
+          : (apiErr.message || 'Failed to load memory content'),
+      );
+    } finally {
+      setContentLoading(false);
+    }
+  };
+
+  const handleDownloadVersion = async (ver: MemoryVersion) => {
+    const mem = memories.find(m => m.id === ver.memory_id);
+    const filename = mem
+      ? `${mem.path.replace(/^\//, '').replace(/\//g, '_')}.v${ver.seq}`
+      : `memory-version-${ver.seq}.txt`;
+    setActionError(null);
+    try {
+      const blob = await apiClient.download(
+        `/v1/memory_stores/${id}/memory_versions/${ver.id}/content`,
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setActionError((err as ApiError).message || 'Failed to download version content');
+    }
+  };
+
+  const handleCreateMemory = async () => {
+    if (!store || !newPath.trim()) return;
+    setCreatingMemory(true);
+    setMemoryError(null);
+    try {
+      const body: WriteMemoryRequest = {
+        path: newPath.trim(),
+        content: newContent,
+      };
+      await apiClient.post<Memory>(
+        `/v1/memory_stores/${store.id}/memories`,
+        body,
+      );
+      setCreateMemoryOpen(false);
+      setNewPath('');
+      setNewContent('');
+      await fetchMemories();
+      await fetchVersions();
+    } catch (err) {
+      const apiErr = err as ApiError;
+      setMemoryError(
+        apiErr.status === 412
+          ? 'Precondition failed — the memory changed since it was loaded. Reload and try again.'
+          : apiErr.message || 'Failed to write memory',
+      );
+    } finally {
+      setCreatingMemory(false);
+    }
+  };
+
+  const handleSaveMemory = async () => {
+    if (!store || !expandedPath) return;
+    setSavingMemory(true);
+    setMemoryError(null);
+    try {
+      await apiClient.post<Memory>(`/v1/memory_stores/${store.id}/memories`, {
+        path: expandedPath,
+        content: editContent,
+      });
+      setEditingMemory(false);
+      await fetchMemories();
+      await fetchVersions();
+      // Refresh expanded content to the new head.
+      const mem = memories.find(m => m.path === expandedPath);
+      if (mem) await openMemory({ ...mem, path: expandedPath });
+    } catch (err) {
+      setMemoryError((err as ApiError).message || 'Failed to update memory');
+    } finally {
+      setSavingMemory(false);
+    }
+  };
+
+  const handleDeleteMemory = async () => {
+    if (!store || !deleteMemoryTarget) return;
+    setMemoryError(null);
+    try {
+      await apiClient.delete(`/v1/memory_stores/${store.id}/memories`, {
+        path: deleteMemoryTarget.path,
+      });
+      if (expandedPath === deleteMemoryTarget.path) {
+        setExpandedPath(null);
+        setMemoryContent(null);
+      }
+      setDeleteMemoryTarget(null);
+      await fetchMemories();
+      await fetchVersions();
+    } catch (err) {
+      setMemoryError((err as ApiError).message || 'Failed to delete memory');
+      setDeleteMemoryTarget(null);
+    }
+  };
+
+  const handleRedact = async () => {
+    if (!store || !redactTarget) return;
+    setRedacting(true);
+    setMemoryError(null);
+    try {
+      await apiClient.post<MemoryVersion>(
+        `/v1/memory_stores/${store.id}/memory_versions/${redactTarget.id}/redact`,
+        { reason: redactReason.trim() || 'redacted via console' },
+      );
+      setRedactTarget(null);
+      setRedactReason('');
+      await fetchVersions();
+      if (expandedPath) {
+        const mem = memories.find(m => m.path === expandedPath);
+        if (mem) await openMemory(mem);
+      }
+    } catch (err) {
+      setMemoryError((err as ApiError).message || 'Failed to redact version');
+      setRedactTarget(null);
+    } finally {
+      setRedacting(false);
+    }
+  };
+
+  if (loading) return <LoadingSpinner />;
+
+  if (error) {
+    return (
+      <ErrorMessage
+        status={error.status}
+        message={error.message}
+        onRetry={() => {
+          setLoading(true);
+          fetchStore();
+          fetchMemories();
+          fetchVersions();
+        }}
+      />
+    );
+  }
+
+  if (!store) return null;
+
+  const isArchived = store.archived_at !== null;
+
+  return (
+    <div className="memory-store-detail-view" data-testid="memory-store-detail-view">
+      <Link to="/memory-stores" className="back-link" data-testid="back-link">
+        ← Memory Stores
+      </Link>
+
+      <div className="memory-store-detail-header">
+        <h1 data-testid="store-name">
+          {store.name}
+          {isArchived && (
+            <span className="archived-badge" data-testid="archived-badge">
+              Archived
+            </span>
+          )}
+        </h1>
+        <div className="memory-store-detail-meta">
+          <span data-testid="store-id">
+            <code>{store.id}</code>
+          </span>
+          <span className="meta-separator">·</span>
+          <span data-testid="store-created">
+            Created {new Date(store.created_at).toLocaleString()}
+          </span>
+          <span className="meta-separator">·</span>
+          <span data-testid="store-updated">
+            Updated {new Date(store.updated_at).toLocaleString()}
+          </span>
+          {isArchived && (
+            <>
+              <span className="meta-separator">·</span>
+              <span data-testid="store-archived">
+                Archived {new Date(store.archived_at as string).toLocaleString()}
+              </span>
+            </>
+          )}
+        </div>
+        <div className="memory-store-desc-row">
+          {editingDesc ? (
+            <div className="memory-store-desc-editor">
+              <textarea
+                value={descDraft}
+                onChange={e => setDescDraft(e.target.value)}
+                rows={2}
+                data-testid="store-desc-input"
+              />
+              <div className="memory-store-desc-editor-actions">
+                <button
+                  onClick={() => setEditingDesc(false)}
+                  data-testid="store-desc-cancel"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn-primary"
+                  disabled={savingDesc}
+                  onClick={handleSaveDesc}
+                  data-testid="store-desc-save"
+                >
+                  {savingDesc ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="memory-store-desc-display">
+              <span data-testid="store-description">
+                {store.description || 'No description'}
+              </span>
+              {!isArchived && (
+                <button
+                  className="memory-store-desc-edit-btn"
+                  onClick={() => {
+                    setDescDraft(store.description || '');
+                    setEditingDesc(true);
+                  }}
+                  data-testid="store-desc-edit"
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {actionError && (
+        <div className="form-error" role="alert" data-testid="store-action-error">
+          {actionError}
+        </div>
+      )}
+
+      <section className="detail-section memory-lifecycle-actions" data-testid="lifecycle-actions">
+        {!isArchived && (
+          <button
+            className="btn-archive"
+            disabled={archiving}
+            onClick={() => setShowArchiveConfirm(true)}
+            data-testid="archive-button"
+          >
+            {archiving ? 'Archiving…' : 'Archive'}
+          </button>
+        )}
+        <button
+          className="btn-sm-danger"
+          disabled={deleting}
+          onClick={() => setShowDeleteConfirm(true)}
+          data-testid="delete-button"
+        >
+          {deleting ? 'Deleting…' : 'Delete'}
+        </button>
+      </section>
+
+      <section className="detail-section" data-testid="memories-section">
+        <div className="memory-section-header">
+          <h2>Memories</h2>
+          {!isArchived && (
+            <button
+              className="btn-primary"
+              onClick={() => {
+                setCreateMemoryOpen(true);
+                setMemoryError(null);
+              }}
+              data-testid="new-memory-btn"
+            >
+              New memory
+            </button>
+          )}
+        </div>
+
+        {memoryError && (
+          <div className="form-error" role="alert" data-testid="memory-error">
+            {memoryError}
+          </div>
+        )}
+
+        {memoriesLoading ? (
+          <LoadingSpinner />
+        ) : memories.length === 0 ? (
+          <p className="empty-text" data-testid="memories-empty">
+            No memories yet. Entries appear here when written by sessions or via
+            the API.
+          </p>
+        ) : (
+          <table className="memory-entries-table" data-testid="memory-table">
+            <thead>
+              <tr>
+                <th>Path</th>
+                <th>Size</th>
+                <th>Updated</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {memories.map(mem => (
+                <MemoryRow
+                  key={mem.id}
+                  mem={mem}
+                  expanded={expandedPath === mem.path}
+                  content={expandedPath === mem.path ? memoryContent : null}
+                  contentNote={expandedPath === mem.path ? contentNote : null}
+                  contentLoading={expandedPath === mem.path ? contentLoading : false}
+                  editing={expandedPath === mem.path && editingMemory}
+                  editContent={editContent}
+                  archived={isArchived}
+                  onToggle={() => openMemory(mem)}
+                  onEditStart={() => {
+                    setEditContent(memoryContent ?? '');
+                    setEditingMemory(true);
+                  }}
+                  onEditCancel={() => setEditingMemory(false)}
+                  onEditChange={setEditContent}
+                  onEditSave={handleSaveMemory}
+                  onDelete={() => setDeleteMemoryTarget(mem)}
+                  saving={savingMemory}
+                />
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <section className="detail-section" data-testid="versions-section">
+        <h2>Recent versions</h2>
+        {versionsLoading ? (
+          <LoadingSpinner />
+        ) : versions.length === 0 ? (
+          <p className="empty-text" data-testid="versions-empty">
+            No versions recorded yet.
+          </p>
+        ) : (
+          <table className="memory-versions-table" data-testid="version-table">
+            <thead>
+              <tr>
+                <th>Seq</th>
+                <th>Action</th>
+                <th>Path</th>
+                <th>Author</th>
+                <th>Size</th>
+                <th>Created</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {versions.map(ver => {
+                const mem = memories.find(m => m.id === ver.memory_id);
+                return (
+                  <tr key={ver.id} data-testid={`version-row-${ver.id}`}>
+                    <td>{ver.seq}</td>
+                    <td>
+                      <code>{ver.action}</code>
+                    </td>
+                    <td className="memory-version-path-cell">
+                      {mem ? mem.path : <code title={ver.memory_id}>{ver.memory_id.slice(0, 8)}…</code>}
+                    </td>
+                    <td>{ver.author}</td>
+                    <td>{humanBytes(ver.size_bytes)}</td>
+                    <td>{new Date(ver.created_at).toLocaleString()}</td>
+                    <td>
+                      {ver.redacted_at ? (
+                        <span className="redacted-badge">Redacted</span>
+                      ) : (
+                        <span className="memory-version-status-ok">Retained</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="memory-version-actions">
+                        {!ver.redacted_at && (
+                          <button
+                            className="btn-sm-secondary"
+                            onClick={() => handleDownloadVersion(ver)}
+                            data-testid={`version-download-btn-${ver.id}`}
+                          >
+                            Download
+                          </button>
+                        )}
+                        {!ver.redacted_at && (
+                          <button
+                            className="btn-sm-danger"
+                            onClick={() => {
+                              setRedactTarget(ver);
+                              setRedactReason('');
+                              setMemoryError(null);
+                            }}
+                            data-testid={`redact-btn-${ver.id}`}
+                          >
+                            Redact
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      {/* Create memory dialog */}
+      {createMemoryOpen && (
+        <div className="memory-detail-dialog-overlay">
+          <div className="memory-detail-dialog" data-testid="memory-create-dialog">
+            <h2>New memory</h2>
+            <div className="form-field">
+              <label htmlFor="memory-create-path">Path</label>
+              <input
+                id="memory-create-path"
+                value={newPath}
+                onChange={e => setNewPath(e.target.value)}
+                placeholder="/preferences/formatting.md"
+                autoFocus
+                data-testid="memory-create-path"
+              />
+            </div>
+            <div className="form-field">
+              <label htmlFor="memory-create-content">Content</label>
+              <textarea
+                id="memory-create-content"
+                value={newContent}
+                onChange={e => setNewContent(e.target.value)}
+                rows={8}
+                data-testid="memory-create-content"
+              />
+            </div>
+            <div className="memory-detail-dialog-actions">
+              <button
+                onClick={() => setCreateMemoryOpen(false)}
+                data-testid="memory-create-cancel"
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                disabled={creatingMemory || !newPath.trim().startsWith('/')}
+                onClick={handleCreateMemory}
+                data-testid="memory-create-submit"
+              >
+                {creatingMemory ? 'Writing…' : 'Write memory'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Redact dialog (needs a reason input, so custom) */}
+      {redactTarget && (
+        <div className="memory-detail-dialog-overlay">
+          <div className="memory-detail-dialog" data-testid="redact-dialog">
+            <h2>Redact version #{redactTarget.seq}</h2>
+            <p className="memory-dialog-note">
+              Permanently zero this version's bytes for compliance (e.g. GDPR).
+              If it is the current head, a redaction marker version is written
+              and the memory is removed from the store view. This cannot be undone.
+            </p>
+            <div className="form-field">
+              <label htmlFor="redact-reason">Reason</label>
+              <input
+                id="redact-reason"
+                value={redactReason}
+                onChange={e => setRedactReason(e.target.value)}
+                placeholder="GDPR erasure request #123"
+                autoFocus
+                data-testid="redact-reason"
+              />
+            </div>
+            <div className="memory-detail-dialog-actions">
+              <button
+                onClick={() => setRedactTarget(null)}
+                data-testid="redact-cancel"
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-sm-danger"
+                disabled={redacting}
+                onClick={handleRedact}
+                data-testid="redact-confirm"
+              >
+                {redacting ? 'Redacting…' : 'Redact version'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={showArchiveConfirm}
+        title="Archive Memory Store"
+        message={`Archive "${store.name}"? Archived stores cannot be mounted by new sessions but remain reachable for forensics.`}
+        onConfirm={handleArchive}
+        onCancel={() => setShowArchiveConfirm(false)}
+      />
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete Memory Store"
+        message={`Permanently delete "${store.name}" and all its memories and versions? This fails while a running session still has the store mounted.`}
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
+      <ConfirmDialog
+        open={deleteMemoryTarget !== null}
+        title="Delete Memory"
+        message={
+          deleteMemoryTarget
+            ? `Soft-delete memory "${deleteMemoryTarget.path}"? A delete version is written so the history stays intact within the retention window.`
+            : ''
+        }
+        onConfirm={handleDeleteMemory}
+        onCancel={() => setDeleteMemoryTarget(null)}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Memory row with expandable content panel
+// ---------------------------------------------------------------------------
+
+interface MemoryRowProps {
+  mem: Memory;
+  expanded: boolean;
+  content: string | null;
+  contentNote: string | null;
+  contentLoading: boolean;
+  editing: boolean;
+  editContent: string;
+  archived: boolean;
+  saving: boolean;
+  onToggle: () => void;
+  onEditStart: () => void;
+  onEditCancel: () => void;
+  onEditChange: (v: string) => void;
+  onEditSave: () => void;
+  onDelete: () => void;
+}
+
+function MemoryRow({
+  mem,
+  expanded,
+  content,
+  contentNote,
+  contentLoading,
+  editing,
+  editContent,
+  archived,
+  saving,
+  onToggle,
+  onEditStart,
+  onEditCancel,
+  onEditChange,
+  onEditSave,
+  onDelete,
+}: MemoryRowProps) {
+  return (
+    <>
+      <tr
+        className="memory-entry-row"
+        onClick={onToggle}
+        data-testid={`memory-row-${mem.path}`}
+        role="link"
+      >
+        <td className="memory-entry-path-cell">
+          <span className="memory-entry-caret">{expanded ? '▾' : '▸'}</span>
+          <code>{mem.path}</code>
+        </td>
+        <td>{humanBytes(mem.size_bytes)}</td>
+        <td>{new Date(mem.updated_at).toLocaleString()}</td>
+        <td>
+          {!archived && (
+            <button
+              className="btn-sm-danger"
+              disabled={saving}
+              onClick={e => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              data-testid={`memory-delete-btn-${mem.path}`}
+            >
+              Delete
+            </button>
+          )}
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="memory-content-row" data-testid={`memory-content-${mem.path}`}>
+          <td colSpan={4}>
+            {contentLoading ? (
+              <LoadingSpinner />
+            ) : editing ? (
+              <div className="memory-content-editor">
+                <textarea
+                  value={editContent}
+                  onChange={e => onEditChange(e.target.value)}
+                  rows={10}
+                  data-testid={`memory-edit-content`}
+                />
+                <div className="memory-content-editor-actions">
+                  <button onClick={onEditCancel} data-testid="memory-edit-cancel">
+                    Cancel
+                  </button>
+                  <button
+                    className="btn-primary"
+                    disabled={saving}
+                    onClick={onEditSave}
+                    data-testid="memory-edit-save"
+                  >
+                    {saving ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            ) : contentNote ? (
+              <p className="memory-content-note">{contentNote}</p>
+            ) : (
+              <div className="memory-content-panel">
+                <pre data-testid="memory-content">{content}</pre>
+                <div className="memory-content-editor-actions">
+                  <button onClick={onEditStart} data-testid="memory-edit-btn">
+                    Edit
+                  </button>
+                </div>
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}

@@ -1,0 +1,266 @@
+.memory-store-detail-view {
+  padding: var(--spacing-xl);
+}
+
+/* Header */
+.memory-store-detail-header {
+  margin-bottom: var(--spacing-lg);
+}
+
+.memory-store-detail-header h1 {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: var(--spacing-xs);
+}
+
+.memory-store-detail-header .archived-badge {
+  margin-left: var(--spacing-xs);
+}
+
+.memory-store-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  margin-bottom: var(--spacing-sm);
+}
+
+.memory-store-detail-meta code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+/* Description row */
+.memory-store-desc-row {
+  margin-top: var(--spacing-sm);
+}
+
+.memory-store-desc-display {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  max-width: 640px;
+}
+
+.memory-store-desc-edit-btn {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  padding: 0;
+  text-decoration: underline;
+  flex-shrink: 0;
+}
+
+.memory-store-desc-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  max-width: 640px;
+}
+
+.memory-store-desc-editor textarea {
+  font-family: var(--font-family);
+  font-size: 0.875rem;
+  padding: var(--spacing-sm);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-bg);
+  resize: vertical;
+}
+
+.memory-store-desc-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+}
+
+/* Lifecycle actions */
+.memory-lifecycle-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-lg);
+}
+
+/* Section headers */
+.memory-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-md);
+}
+
+.memory-section-header h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.detail-section {
+  margin-bottom: var(--spacing-xl);
+}
+
+.detail-section > h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: var(--spacing-md);
+}
+
+/* Memories table */
+.memory-entries-table {
+  font-size: 0.8125rem;
+}
+
+.memory-entry-row {
+  cursor: pointer;
+}
+
+.memory-entry-path-cell {
+  white-space: nowrap;
+}
+
+.memory-entry-path-cell code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.memory-entry-caret {
+  display: inline-block;
+  width: 1.1em;
+  color: var(--color-text-muted);
+}
+
+/* Expanded content row */
+.memory-content-row td {
+  background: var(--color-bg-secondary);
+  padding: var(--spacing-md);
+}
+
+.memory-content-panel pre {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-light);
+  padding: var(--spacing-sm) var(--spacing-md);
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0 0 var(--spacing-sm);
+}
+
+.memory-content-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.memory-content-editor textarea {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-border-light);
+  background: var(--color-bg);
+  resize: vertical;
+}
+
+.memory-content-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+}
+
+.memory-content-note {
+  color: var(--color-text-secondary);
+  font-style: italic;
+  font-size: 0.8125rem;
+  margin: 0;
+}
+
+/* Versions table */
+.memory-versions-table {
+  font-size: 0.8125rem;
+}
+
+.memory-version-path-cell {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-version-path-cell code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.memory-version-status-ok {
+  color: var(--color-status-running);
+  font-size: 0.75rem;
+}
+
+.memory-version-actions {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.redacted-badge {
+  display: inline-block;
+  padding: 0.1em 0.5em;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* Dialogs (create memory / redact) */
+.memory-detail-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.memory-detail-dialog {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-lg);
+  width: min(520px, calc(100vw - 48px));
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+}
+
+.memory-detail-dialog h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: var(--spacing-md);
+}
+
+.memory-detail-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-md);
+}
+
+.memory-dialog-note {
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  margin-bottom: var(--spacing-md);
+}

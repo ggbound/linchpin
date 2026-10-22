@@ -1,11 +1,30 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { apiClient, ApiError } from '../api/client';
-import type { Vault, CredentialResponse, CredentialType, ProviderName, PaginatedResponse } from '../types';
+import type {
+  Vault,
+  CredentialResponse,
+  CredentialType,
+  ProviderName,
+  PaginatedResponse,
+  UpdateCredentialRequest,
+} from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import ConfirmDialog from '../components/ConfirmDialog';
 import './VaultDetailView.css';
+
+/** Secret fields editable per credential type (aligned with backend secrets schema). */
+const SECRET_FIELDS: Record<CredentialType, { key: keyof UpdateCredentialRequest; label: string; required?: boolean }[]> = {
+  bearer_token: [{ key: 'token', label: 'Token', required: true }],
+  api_key: [{ key: 'api_key', label: 'API Key', required: true }],
+  oauth: [
+    { key: 'access_token', label: 'Access Token', required: true },
+    { key: 'refresh_token', label: 'Refresh Token' },
+    { key: 'client_secret', label: 'Client Secret' },
+  ],
+  byok_kek: [{ key: 'kek', label: 'KEK (Fernet key)', required: true }],
+};
 
 export default function VaultDetailView() {
   const { id } = useParams<{ id: string }>();
@@ -25,8 +44,15 @@ export default function VaultDetailView() {
   const [refreshTokenVal, setRefreshTokenVal] = useState('');
   const [clientIdVal, setClientIdVal] = useState('');
   const [clientSecretVal, setClientSecretVal] = useState('');
+  const [kekVal, setKekVal] = useState('');
   const [addingCred, setAddingCred] = useState(false);
   const [addCredError, setAddCredError] = useState<string | null>(null);
+
+  // Edit secrets (PATCH)
+  const [editCredId, setEditCredId] = useState<string | null>(null);
+  const [editSecrets, setEditSecrets] = useState<Record<string, string>>({});
+  const [savingSecrets, setSavingSecrets] = useState(false);
+  const [editSecretsError, setEditSecretsError] = useState<string | null>(null);
 
   // Confirm dialogs
   const [deleteCredTarget, setDeleteCredTarget] = useState<CredentialResponse | null>(null);
@@ -64,6 +90,7 @@ export default function VaultDetailView() {
     setRefreshTokenVal('');
     setClientIdVal('');
     setClientSecretVal('');
+    setKekVal('');
     setAddCredError(null);
   };
 
@@ -78,6 +105,8 @@ export default function VaultDetailView() {
         body = { credential_type: 'bearer_token', mcp_server_url: mcpUrl, token: tokenVal };
       } else if (credType === 'api_key') {
         body = { credential_type: 'api_key', provider, api_key: apiKeyVal };
+      } else if (credType === 'byok_kek') {
+        body = { credential_type: 'byok_kek', kek: kekVal };
       } else {
         body = {
           credential_type: 'oauth',
@@ -101,6 +130,44 @@ export default function VaultDetailView() {
       setAddCredError(apiErr.message || 'Failed to add credential');
     } finally {
       setAddingCred(false);
+    }
+  };
+
+  const startEditSecrets = (cred: CredentialResponse) => {
+    setEditCredId(cred.id);
+    setEditSecrets({});
+    setEditSecretsError(null);
+  };
+
+  const handleSaveSecrets = async (cred: CredentialResponse) => {
+    setSavingSecrets(true);
+    setEditSecretsError(null);
+
+    try {
+      const body: UpdateCredentialRequest = {};
+      for (const field of SECRET_FIELDS[cred.credential_type]) {
+        const val = (editSecrets[field.key] || '').trim();
+        if (val) {
+          (body as Record<string, unknown>)[field.key] = val;
+        }
+      }
+      if (Object.keys(body).length === 0) {
+        setEditSecretsError('Provide at least one secret value.');
+        return;
+      }
+
+      const updated = await apiClient.patch<CredentialResponse>(
+        `/v1/vaults/${id}/credentials/${cred.id}`,
+        body,
+      );
+      setCredentials(prev => prev.map(c => (c.id === cred.id ? updated : c)));
+      setEditCredId(null);
+      setEditSecrets({});
+    } catch (err) {
+      const apiErr = err as ApiError;
+      setEditSecretsError(apiErr.message || 'Failed to update secrets');
+    } finally {
+      setSavingSecrets(false);
     }
   };
 
@@ -218,7 +285,14 @@ export default function VaultDetailView() {
                   <option value="bearer_token">Bearer Token</option>
                   <option value="api_key">API Key</option>
                   <option value="oauth">OAuth</option>
+                  <option value="byok_kek">BYOK KEK (encryption key)</option>
                 </select>
+                {credType === 'byok_kek' && (
+                  <p className="section-hint" data-testid="kek-hint">
+                    A customer-managed Fernet key-encryption-key used for event encryption
+                    (x-kek-credential-id on session creation).
+                  </p>
+                )}
               </div>
             </div>
 
@@ -275,6 +349,23 @@ export default function VaultDetailView() {
                     placeholder="API key"
                     required
                     data-testid="cred-api-key-input"
+                  />
+                </div>
+              </div>
+            )}
+
+            {credType === 'byok_kek' && (
+              <div className="form-row">
+                <div className="form-field">
+                  <label htmlFor="cred-kek">KEK (Fernet key)</label>
+                  <input
+                    id="cred-kek"
+                    type="password"
+                    value={kekVal}
+                    onChange={e => setKekVal(e.target.value)}
+                    placeholder="e.g. gAAAAA... (Fernet.generate_key())"
+                    required
+                    data-testid="cred-kek-input"
                   />
                 </div>
               </div>
@@ -366,38 +457,103 @@ export default function VaultDetailView() {
         ) : (
           <div className="credential-list">
             {credentials.map(cred => (
-              <div key={cred.id} className="credential-card" data-testid={`credential-card-${cred.id}`}>
-                <div className="credential-card-info">
-                  <div className="credential-card-type">{cred.credential_type}</div>
-                  <div className="credential-card-target">
-                    {cred.mcp_server_url || cred.provider || '—'}
+              <div key={cred.id} className="credential-card-wrapper" data-testid={`credential-card-${cred.id}`}>
+                <div className="credential-card">
+                  <div className="credential-card-info">
+                    <div className="credential-card-type">{cred.credential_type}</div>
+                    <div className="credential-card-target">
+                      {cred.mcp_server_url || cred.provider || (cred.credential_type === 'byok_kek' ? 'Customer-managed KEK' : '—')}
+                    </div>
+                    <div className="credential-card-meta">
+                      Created {new Date(cred.created_at).toLocaleString()}
+                      {cred.updated_at !== cred.created_at &&
+                        ` · Updated ${new Date(cred.updated_at).toLocaleString()}`}
+                      {cred.archived_at && ' · Archived'}
+                    </div>
                   </div>
-                  <div className="credential-card-meta">
-                    Created {new Date(cred.created_at).toLocaleString()}
-                    {cred.archived_at && ' · Archived'}
+                  <div className="credential-card-secret" data-testid="credential-secret-mask">
+                    ••••••••
                   </div>
-                </div>
-                <div className="credential-card-secret" data-testid="credential-secret-mask">
-                  ••••••••
-                </div>
-                <div className="credential-card-actions">
-                  {!cred.archived_at && (
+                  <div className="credential-card-actions">
+                    {!cred.archived_at && !isArchived && (
+                      <button
+                        className="btn-sm-secondary"
+                        onClick={() =>
+                          editCredId === cred.id
+                            ? setEditCredId(null)
+                            : startEditSecrets(cred)
+                        }
+                        data-testid="cred-edit-btn"
+                      >
+                        {editCredId === cred.id ? 'Cancel' : 'Edit secrets'}
+                      </button>
+                    )}
+                    {!cred.archived_at && (
+                      <button
+                        className="btn-sm-secondary"
+                        onClick={() => setArchiveCredTarget(cred)}
+                        data-testid="cred-archive-btn"
+                      >
+                        Archive
+                      </button>
+                    )}
                     <button
-                      className="btn-sm-secondary"
-                      onClick={() => setArchiveCredTarget(cred)}
-                      data-testid="cred-archive-btn"
+                      className="btn-sm-danger"
+                      onClick={() => setDeleteCredTarget(cred)}
+                      data-testid="cred-delete-btn"
                     >
-                      Archive
+                      Delete
                     </button>
-                  )}
-                  <button
-                    className="btn-sm-danger"
-                    onClick={() => setDeleteCredTarget(cred)}
-                    data-testid="cred-delete-btn"
-                  >
-                    Delete
-                  </button>
+                  </div>
                 </div>
+
+                {editCredId === cred.id && (
+                  <div className="edit-secrets-panel" data-testid="edit-secrets-panel">
+                    {SECRET_FIELDS[cred.credential_type].map(field => (
+                      <div className="edit-secrets-field" key={field.key}>
+                        <label htmlFor={`edit-${cred.id}-${field.key}`}>
+                          {field.label}
+                          {field.required ? '' : ' (optional)'}
+                        </label>
+                        <input
+                          id={`edit-${cred.id}-${field.key}`}
+                          type="password"
+                          value={editSecrets[field.key] || ''}
+                          onChange={e =>
+                            setEditSecrets(prev => ({ ...prev, [field.key]: e.target.value }))
+                          }
+                          placeholder={field.required ? 'New value' : 'Leave empty to clear'}
+                          data-testid={`edit-secret-${field.key}`}
+                        />
+                      </div>
+                    ))}
+                    <p className="edit-secrets-hint">
+                      Provided values replace all stored secrets for this credential.
+                    </p>
+                    {editSecretsError && (
+                      <div className="form-error" role="alert" data-testid="edit-secrets-error">
+                        {editSecretsError}
+                      </div>
+                    )}
+                    <div className="edit-secrets-actions">
+                      <button
+                        className="btn-primary"
+                        disabled={savingSecrets}
+                        onClick={() => handleSaveSecrets(cred)}
+                        data-testid="edit-secrets-save"
+                      >
+                        {savingSecrets ? 'Saving…' : 'Save secrets'}
+                      </button>
+                      <button
+                        className="btn-sm-secondary"
+                        onClick={() => setEditCredId(null)}
+                        data-testid="edit-secrets-cancel"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

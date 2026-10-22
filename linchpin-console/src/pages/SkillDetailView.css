@@ -1,0 +1,96 @@
+.skill-detail-view {
+  padding: var(--spacing-xl);
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: var(--spacing-md);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  font-size: 0.875rem;
+}
+
+.back-link:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+
+/* Header */
+.skill-detail-header {
+  margin-bottom: var(--spacing-lg);
+}
+
+.skill-detail-header h1 {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: var(--spacing-xs);
+}
+
+.skill-detail-header .archived-badge {
+  margin-left: var(--spacing-xs);
+}
+
+.skill-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  margin-bottom: var(--spacing-sm);
+}
+
+.skill-detail-meta code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.skill-detail-desc {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  max-width: 640px;
+  margin: 0;
+}
+
+/* Lifecycle actions */
+.skill-lifecycle-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-lg);
+}
+
+/* Sections */
+.detail-section {
+  margin-bottom: var(--spacing-xl);
+}
+
+.detail-section > h2 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: var(--spacing-md);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: var(--spacing-sm) var(--spacing-md);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.detail-grid dt {
+  color: var(--color-text-secondary);
+}
+
+.detail-grid dd {
+  margin: 0;
+}
+
+.skill-sha256-code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  word-break: break-all;
+}

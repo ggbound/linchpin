@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { apiClient } from '../api/client';
-import type { SessionEvent, SessionStatus, PaginatedEventsResponse } from '../types';
+import { SSEClient } from '../api/sse';
+import type { SessionEvent, SessionStatus, PaginatedEventsResponse, StreamState } from '../types';
 import ToolConfirmationCard from './ToolConfirmationCard';
 import LoadingSpinner from './LoadingSpinner';
 import './EventStreamPanel.css';
@@ -25,6 +26,7 @@ export function mergeEvents(
 /** Return a CSS class suffix for the given event type. */
 export function eventTypeClass(type: string): string {
   if (type === 'user.message') return 'user-message';
+  if (type === 'user.steer') return 'user-message';
   if (type === 'agent.message') return 'agent-message';
   if (type === 'agent.message_delta') return 'agent-message-delta';
   if (type === 'agent.thinking') return 'agent-thinking';
@@ -43,13 +45,28 @@ export function eventTypeClass(type: string): string {
 
 const TERMINAL_STATUSES: SessionStatus[] = ['terminated', 'failed'];
 const POLL_INTERVAL_MS = 1000;
+/** Page size for the REST history pull (server max is 100). */
+const HISTORY_PAGE_SIZE = 100;
+/** Safety cap on history pages pulled before falling back to the stream. */
+const MAX_HISTORY_PAGES = 20;
+
+const STREAM_STATE_LABELS: Record<StreamState, string> = {
+  connecting: 'Connecting…',
+  live: 'Live',
+  reconnecting: 'Reconnecting…',
+  closed: 'Offline',
+};
 
 export default function EventStreamPanel({ sessionId, sessionStatus }: EventStreamPanelProps) {
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [streamState, setStreamState] = useState<StreamState>('closed');
   const [streamingMessages, setStreamingMessages] = useState<Map<string, string>>(new Map());
   const listRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
+  const sseRef = useRef<SSEClient | null>(null);
+  const statusRef = useRef<SessionStatus>(sessionStatus);
+  statusRef.current = sessionStatus;
 
   const scrollToBottom = () => {
     if (listRef.current && !userScrolledUp.current) {
@@ -63,35 +80,69 @@ export default function EventStreamPanel({ sessionId, sessionStatus }: EventStre
     userScrolledUp.current = scrollHeight - scrollTop - clientHeight > 50;
   };
 
-  // Initial fetch + continuous polling for non-terminal sessions
+  // History pull (REST) + live tail (SSE) — keyed on session only so a
+  // transient status change does not tear the stream down.
   useEffect(() => {
     let cancelled = false;
 
-    async function fetchEvents() {
-      try {
+    setLoading(true);
+    setEvents([]);
+
+    async function pullHistory(): Promise<string | undefined | null> {
+      let after: string | undefined;
+      let merged: SessionEvent[] = [];
+      for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
+        const params: Record<string, string> = { limit: String(HISTORY_PAGE_SIZE) };
+        if (after) params['after_cursor'] = after;
         const res = await apiClient.get<PaginatedEventsResponse>(
           `/v1/sessions/${sessionId}/events`,
+          params,
         );
-        if (cancelled) return;
-        setEvents((prev) => {
-          const merged = mergeEvents(prev, res.events);
-          if (merged.length !== prev.length) return merged;
-          if (merged.some((e, i) => e.cursor !== prev[i]?.cursor)) return merged;
-          return prev;
-        });
-      } catch {
-        // Silently handle
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (cancelled) return null;
+        merged = mergeEvents(merged, res.events);
+        if (!res.next_cursor || res.events.length === 0) {
+          after = res.next_cursor ?? undefined;
+          break;
+        }
+        after = res.next_cursor;
       }
+      if (cancelled) return null;
+      setEvents(merged);
+      return after;
     }
 
+    pullHistory().then((cursor) => {
+      if (cancelled) return;
+      setLoading(false);
+      if (cursor === null) return;
+      // Terminal sessions have nothing left to stream live.
+      if (TERMINAL_STATUSES.includes(statusRef.current)) return;
+      const sse = new SSEClient();
+      sseRef.current = sse;
+      sse.connect(
+        sessionId,
+        cursor,
+        (ev) => setEvents((prev) => mergeEvents(prev, [ev])),
+        setStreamState,
+      );
+    });
+
+    return () => {
+      cancelled = true;
+      sseRef.current?.disconnect();
+      sseRef.current = null;
+      setStreamState('closed');
+    };
+  }, [sessionId]);
+
+  // Deltas are in-memory only (never persisted), so the in-flight
+  // bubble still comes from the /streaming poll.
+  useEffect(() => {
     async function fetchStreaming() {
       try {
         const res = await apiClient.get<{ streaming: { message_id: string; text: string; done: boolean } | null }>(
           `/v1/sessions/${sessionId}/streaming`,
         );
-        if (cancelled) return;
         if (res.streaming && res.streaming.text && !res.streaming.done) {
           setStreamingMessages(new Map([[res.streaming.message_id, res.streaming.text]]));
         } else {
@@ -102,26 +153,22 @@ export default function EventStreamPanel({ sessionId, sessionStatus }: EventStre
       }
     }
 
-    async function poll() {
-      await fetchEvents();
-      await fetchStreaming();
+    if (TERMINAL_STATUSES.includes(sessionStatus)) {
+      setStreamingMessages(new Map());
+      return;
     }
-
-    setLoading(true);
-    setEvents([]);
-    fetchEvents();
-
-    // Start polling if session is not terminal
-    let interval: ReturnType<typeof setInterval> | undefined;
-    if (!TERMINAL_STATUSES.includes(sessionStatus)) {
-      interval = setInterval(poll, POLL_INTERVAL_MS);
-    }
-
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
+    fetchStreaming();
+    const interval = setInterval(fetchStreaming, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
   }, [sessionId, sessionStatus]);
+
+  // Disconnect the live stream when the session reaches a terminal state.
+  useEffect(() => {
+    if (TERMINAL_STATUSES.includes(sessionStatus)) {
+      sseRef.current?.disconnect();
+      setStreamState('closed');
+    }
+  }, [sessionStatus]);
 
   // Scroll to bottom when events or streaming messages change
   useEffect(() => {
@@ -173,7 +220,7 @@ export default function EventStreamPanel({ sessionId, sessionStatus }: EventStre
       return null;
     }
 
-    // user.message, agent.message, agent.thinking
+    // user.message, user.steer, agent.message, agent.thinking
     const text = (event.payload.text as string) ?? (event.payload.content as string) ?? (event.payload.message as string) ?? '';
 
     // Render markdown for agent messages
@@ -194,8 +241,17 @@ export default function EventStreamPanel({ sessionId, sessionStatus }: EventStre
 
   if (loading) return <LoadingSpinner inline />;
 
+  const showStateBadge =
+    !TERMINAL_STATUSES.includes(sessionStatus) && streamState !== 'closed';
+
   return (
     <div className="event-stream-panel" data-testid="event-stream-panel">
+      {showStateBadge && (
+        <div className={`event-stream-state event-stream-state--${streamState}`} data-testid="stream-state">
+          <span className="event-stream-state-dot" />
+          {STREAM_STATE_LABELS[streamState]}
+        </div>
+      )}
       <div
         className="event-stream-list"
         ref={listRef}

@@ -1,0 +1,72 @@
+.subagent-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.subagent-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm);
+  background: var(--color-bg-secondary);
+}
+
+.subagent-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-sm);
+  flex: 1;
+}
+
+.subagent-fields .subagent-desc {
+  grid-column: 1 / -1;
+}
+
+.subagent-hint {
+  display: block;
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+.subagent-hint--error {
+  color: var(--color-danger);
+}
+
+.subagent-remove {
+  font-size: 0.75rem;
+  color: var(--color-danger);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  cursor: pointer;
+  align-self: center;
+}
+
+.subagent-remove:hover {
+  border-color: var(--color-danger);
+}
+
+.subagent-add {
+  align-self: flex-start;
+  font-size: 0.8125rem;
+  color: var(--color-primary);
+  background: none;
+  border: 1px dashed var(--color-border, var(--color-border-light));
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-xs) var(--spacing-md);
+  cursor: pointer;
+}
+
+.subagent-add:hover:not(:disabled) {
+  border-color: var(--color-primary);
+}
+
+.subagent-add:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+}

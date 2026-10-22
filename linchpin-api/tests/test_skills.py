@@ -64,6 +64,7 @@ def _make_skill_row(*, name: str = "gh-pr", archived: bool = False):
         "id": uuid.uuid4(),
         "name": name,
         "description": "Creates pull requests. Use when the user asks to open a PR.",
+        "version": "1.0.0",
         "workspace_id": uuid.UUID("00000000-0000-0000-0000-000000000000"),
         "bundle_sha256": "a" * 64,
         "bundle_size": 1024,
@@ -127,15 +128,42 @@ class TestParseSkillMetadata:
             "description: Creates PRs in GitHub.\n---\n\nSkill body.\n"
         )
         bundle = _make_tar_bundle(body)
-        name, desc = parse_skill_metadata(bundle)
+        name, desc, version = parse_skill_metadata(bundle)
         assert name == "gh-pr"
         assert desc == "Creates PRs in GitHub."
+        assert version is None
 
     def test_happy_path_zip(self):
         body = "---\nname: xlsx\ndescription: Reads xlsx files.\n---\n"
         bundle = _make_zip_bundle(body)
-        name, _ = parse_skill_metadata(bundle)
+        name, _, _ = parse_skill_metadata(bundle)
         assert name == "xlsx"
+
+    def test_version_extracted_when_present(self):
+        body = (
+            "---\nname: gh-pr\ndescription: Creates PRs.\n"
+            "version: 2.1.0\n---\n"
+        )
+        bundle = _make_tar_bundle(body)
+        _, _, version = parse_skill_metadata(bundle)
+        assert version == "2.1.0"
+
+    def test_empty_version_treated_as_missing(self):
+        body = (
+            "---\nname: gh-pr\ndescription: Creates PRs.\nversion:\n---\n"
+        )
+        bundle = _make_tar_bundle(body)
+        _, _, version = parse_skill_metadata(bundle)
+        assert version is None
+
+    def test_version_too_long_rejected(self):
+        body = (
+            f"---\nname: gh-pr\ndescription: Creates PRs.\n"
+            f"version: {'v' * 65}\n---\n"
+        )
+        bundle = _make_tar_bundle(body)
+        with pytest.raises(SkillBundleError, match="version must be ≤ 64"):
+            parse_skill_metadata(bundle)
 
     def test_unknown_archive_format_rejected(self):
         with pytest.raises(SkillBundleError, match="not a recognized archive"):
@@ -220,6 +248,7 @@ def test_upload_skill_creates_row(mock_fetch_one, app_client, tmp_path):
     body = resp.json()
     assert body["name"] == "gh-pr"
     assert body["description"] == skill_row["description"]
+    assert body["version"] == skill_row["version"]
     # Bundle bytes landed on disk under the content-addressable path.
     skills_root = tmp_path / "skills"
     # The path is content-addressed; we don't pin the sha but the
@@ -227,6 +256,27 @@ def test_upload_skill_creates_row(mock_fetch_one, app_client, tmp_path):
     all_paths = list(skills_root.rglob("*.tar.gz"))
     assert len(all_paths) == 1
     assert all_paths[0].read_bytes() == bundle
+
+
+@patch("app.routes.skills.fetch_one", new_callable=AsyncMock)
+def test_upload_skill_persists_frontmatter_version(mock_fetch_one, app_client):
+    bundle = _make_tar_bundle(
+        "---\nname: gh-pr\ndescription: Creates PRs.\nversion: 2.1.0\n---\n"
+    )
+    # INSERT path: first lookup is None, second call returns the row.
+    skill_row = _make_skill_row(name="gh-pr")
+    mock_fetch_one.side_effect = [None, skill_row]
+
+    resp = app_client.post(
+        "/v1/skills",
+        files={"bundle": ("skill.tar.gz", bundle, "application/gzip")},
+        headers=AUTH,
+    )
+    assert resp.status_code == 201, resp.text
+    # The parsed frontmatter version was passed to the INSERT
+    # (args[0] is the SQL; params follow: id, name, description, version).
+    insert_params = mock_fetch_one.await_args_list[1].args
+    assert insert_params[4] == "2.1.0"
 
 
 @patch("app.routes.skills.fetch_one", new_callable=AsyncMock)
@@ -257,7 +307,7 @@ def test_upload_skill_too_large_returns_413(app_client):
 @patch("app.routes.skills.fetch_one", new_callable=AsyncMock)
 def test_upload_skill_same_name_updates_row(mock_fetch_one, app_client):
     bundle = _make_tar_bundle(
-        "---\nname: gh-pr\ndescription: Updated description.\n---\n"
+        "---\nname: gh-pr\ndescription: Updated description.\nversion: 3.0.0\n---\n"
     )
     existing_row = _make_skill_row(name="gh-pr")
     updated_row = _make_skill_row(name="gh-pr")
@@ -272,8 +322,75 @@ def test_upload_skill_same_name_updates_row(mock_fetch_one, app_client):
     )
     assert resp.status_code == 201
     assert resp.json()["description"] == "Updated description."
+    # The parsed frontmatter version was passed to the UPDATE
+    # (args[0] is the SQL; params follow: description, version).
+    update_params = mock_fetch_one.await_args_list[1].args
+    assert update_params[2] == "3.0.0"
     # Two fetch_one calls: lookup + UPDATE RETURNING.
     assert mock_fetch_one.await_count == 2
+
+
+@patch("app.routes.skills.fetch_one", new_callable=AsyncMock)
+def test_preflight_reports_fresh_insert(mock_fetch_one, app_client):
+    bundle = _make_tar_bundle(
+        "---\nname: gh-pr\ndescription: Creates PRs.\nversion: 1.2.0\n---\n"
+    )
+    mock_fetch_one.return_value = None  # no same-name skill
+
+    resp = app_client.post(
+        "/v1/skills/preflight",
+        files={"bundle": ("skill.tar.gz", bundle, "application/gzip")},
+        headers=AUTH,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == "gh-pr"
+    assert body["description"] == "Creates PRs."
+    assert body["version"] == "1.2.0"
+    assert body["replaces"] is None
+
+
+@patch("app.routes.skills.fetch_one", new_callable=AsyncMock)
+def test_preflight_reports_replacement_target(mock_fetch_one, app_client):
+    bundle = _make_tar_bundle(
+        "---\nname: gh-pr\ndescription: Creates PRs.\nversion: 2.0.0\n---\n"
+    )
+    existing_row = _make_skill_row(name="gh-pr")
+    mock_fetch_one.return_value = existing_row
+
+    resp = app_client.post(
+        "/v1/skills/preflight",
+        files={"bundle": ("skill.tar.gz", bundle, "application/gzip")},
+        headers=AUTH,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == "gh-pr"
+    assert body["version"] == "2.0.0"
+    assert body["replaces"]["id"] == str(existing_row["id"])
+    assert body["replaces"]["version"] == "1.0.0"
+
+
+def test_preflight_invalid_bundle_returns_422(app_client):
+    bundle = _make_tar_bundle("# no frontmatter\n")
+    resp = app_client.post(
+        "/v1/skills/preflight",
+        files={"bundle": ("skill.tar.gz", bundle, "application/gzip")},
+        headers=AUTH,
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"] == "invalid_skill_bundle"
+
+
+def test_preflight_too_large_returns_413(app_client):
+    huge = b"x" * (SKILL_BUNDLE_MAX_BYTES + 1)
+    resp = app_client.post(
+        "/v1/skills/preflight",
+        files={"bundle": ("skill.tar.gz", huge, "application/gzip")},
+        headers=AUTH,
+    )
+    assert resp.status_code == 413
+    assert resp.json()["error"] == "skill_too_large"
 
 
 @patch("app.routes.skills.fetch_all", new_callable=AsyncMock)

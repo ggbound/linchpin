@@ -29,6 +29,7 @@ from app.models import (
     SKILL_BUNDLE_MAX_BYTES,
     Skill,
     SkillListResponse,
+    SkillPreflightResponse,
 )
 from app.skills import (
     SkillBundleError,
@@ -52,12 +53,41 @@ def _row_to_skill(row: asyncpg.Record) -> Skill:
         id=str(row["id"]),
         name=row["name"],
         description=row["description"],
+        version=row["version"],
         bundle_sha256=row["bundle_sha256"],
         bundle_size=row["bundle_size"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         archived_at=row["archived_at"],
     )
+
+
+async def _validated_bundle_bytes(bundle: UploadFile) -> bytes:
+    """Read an uploaded bundle and enforce the size cap (413)."""
+    content = await bundle.read()
+    if len(content) > SKILL_BUNDLE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "error": "skill_too_large",
+                "message": (
+                    f"skill bundle exceeds {SKILL_BUNDLE_MAX_BYTES} byte cap"
+                ),
+                "limit_bytes": SKILL_BUNDLE_MAX_BYTES,
+            },
+        )
+    return content
+
+
+def _parsed_metadata(content: bytes) -> tuple[str, str, str | None]:
+    """Parse bundle frontmatter, mapping parse errors to 422."""
+    try:
+        return parse_skill_metadata(content)
+    except SkillBundleError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_skill_bundle", "message": str(exc)},
+        )
 
 
 def _parse_uuid(value: str, label: str = "Skill") -> uuid.UUID:
@@ -90,6 +120,34 @@ async def _persist_bundle(content: bytes, sha: str) -> str:
     return rel
 
 
+@router.post("/preflight", response_model=SkillPreflightResponse)
+async def preflight_skill(
+    bundle: UploadFile = File(...),
+    ctx: AuthContext = Depends(require_auth),
+) -> SkillPreflightResponse:
+    """Parse a bundle and report what an upload would do — without
+    persisting anything. The console calls this before an upload
+    proceeds so it can warn the developer when a same-name skill
+    (``replaces``) will be overwritten by the upsert.
+    """
+    content = await _validated_bundle_bytes(bundle)
+    name, description, version = _parsed_metadata(content)
+    existing = await fetch_one(
+        """
+        SELECT * FROM skills
+        WHERE workspace_id = $1 AND name = $2 AND archived_at IS NULL
+        """,
+        uuid.UUID(ctx.project_id),
+        name,
+    )
+    return SkillPreflightResponse(
+        name=name,
+        description=description,
+        version=version,
+        replaces=_row_to_skill(existing) if existing is not None else None,
+    )
+
+
 @router.post("", response_model=Skill, status_code=201)
 async def upload_skill(
     bundle: UploadFile = File(...),
@@ -100,26 +158,8 @@ async def upload_skill(
     new row or updates the existing one with the same ``name`` (the
     update path is how operators ship a new revision of a skill).
     """
-    content = await bundle.read()
-    if len(content) > SKILL_BUNDLE_MAX_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail={
-                "error": "skill_too_large",
-                "message": (
-                    f"skill bundle exceeds {SKILL_BUNDLE_MAX_BYTES} byte cap"
-                ),
-                "limit_bytes": SKILL_BUNDLE_MAX_BYTES,
-            },
-        )
-
-    try:
-        name, description = parse_skill_metadata(content)
-    except SkillBundleError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "invalid_skill_bundle", "message": str(exc)},
-        )
+    content = await _validated_bundle_bytes(bundle)
+    name, description, version = _parsed_metadata(content)
 
     sha = hashlib.sha256(content).hexdigest()
     storage_rel = await _persist_bundle(content, sha)
@@ -139,12 +179,13 @@ async def upload_skill(
         row = await fetch_one(
             """
             UPDATE skills
-            SET description = $1, bundle_sha256 = $2, bundle_size = $3,
-                storage_path = $4, updated_at = $5
-            WHERE id = $6
+            SET description = $1, version = $2, bundle_sha256 = $3,
+                bundle_size = $4, storage_path = $5, updated_at = $6
+            WHERE id = $7
             RETURNING *
             """,
             description,
+            version,
             sha,
             size_bytes,
             storage_rel,
@@ -155,14 +196,16 @@ async def upload_skill(
         row = await fetch_one(
             """
             INSERT INTO skills
-                (id, name, description, workspace_id, bundle_sha256,
-                 bundle_size, storage_path, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+                (id, name, description, version, workspace_id,
+                 bundle_sha256, bundle_size, storage_path,
+                 created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
             RETURNING *
             """,
             uuid.uuid4(),
             name,
             description,
+            version,
             project_uid,
             sha,
             size_bytes,

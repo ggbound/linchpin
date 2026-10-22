@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { apiClient, ApiError } from '../api/client';
 import type { Agent, Session, PaginatedResponse } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -96,6 +96,8 @@ export default function SessionListView() {
       s.id.toLowerCase().includes(searchQuery.toLowerCase()),
     );
   }
+
+  const agentNames = new Map(agents.map(a => [a.id, a.name]));
 
   if (loading) return <LoadingSpinner />;
 
@@ -208,7 +210,12 @@ export default function SessionListView() {
                     <StatusBadge status={session.status} />
                   </td>
                   <td className="cell-id" data-testid="session-cell-agent">
-                    <code>{session.agent_id}</code>
+                    <Link
+                      to={`/agents/${session.agent_id}`}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      {agentNames.get(session.agent_id) ?? session.agent_id}
+                    </Link>
                   </td>
                   <td data-testid="session-cell-created">
                     {formatRelativeTime(session.created_at)}

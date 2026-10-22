@@ -1,0 +1,150 @@
+.deployment-create-view {
+  padding: var(--spacing-xl);
+  max-width: 760px;
+}
+
+.deployment-create-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: var(--spacing-xs);
+}
+
+.deployment-create-subtitle {
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--spacing-xl);
+  max-width: 560px;
+  line-height: 1.5;
+}
+
+.deployment-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.deployment-form-row {
+  display: flex;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+}
+
+.deployment-form-row .form-field {
+  flex: 1;
+  min-width: 220px;
+}
+
+.deployment-form .form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.deployment-form label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.deployment-form select,
+.deployment-form input {
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: 0.8125rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+}
+
+.deployment-form select:focus,
+.deployment-form input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.deployment-form .section-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.deployment-form .section-hint code {
+  font-size: 0.6875rem;
+}
+
+/* Initial event rows */
+.dep-event-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+}
+
+.dep-event-row select {
+  width: 150px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+}
+
+.dep-event-row input {
+  flex: 1;
+}
+
+.dep-event-remove {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.dep-event-remove:hover:not(:disabled) {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.dep-event-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dep-event-add {
+  align-self: flex-start;
+  margin-top: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-md);
+  font-size: 0.8125rem;
+  color: var(--color-primary);
+  background: none;
+  border: 1px dashed var(--color-primary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.dep-event-add:hover {
+  background: rgba(184, 58, 26, 0.06);
+}
+
+.deployment-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.btn-cancel-link {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.btn-cancel-link:hover {
+  color: var(--color-text-primary);
+}
+
+.form-error {
+  font-size: 0.75rem;
+  color: var(--color-danger);
+}

@@ -1,17 +1,26 @@
 import { useState } from 'react';
 import { apiClient, ApiError } from '../api/client';
-import type { PostEventsRequest } from '../types';
+import type { PostEventsRequest, SessionStatus } from '../types';
 import './MessageInput.css';
 
 interface MessageInputProps {
   sessionId: string;
   disabled: boolean;
+  sessionStatus?: SessionStatus;
 }
 
-export default function MessageInput({ sessionId, disabled }: MessageInputProps) {
+export default function MessageInput({ sessionId, disabled, sessionStatus }: MessageInputProps) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [interrupting, setInterrupting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isRunning = sessionStatus === 'running';
+
+  const postEvent = async (type: 'user.message' | 'user.steer' | 'user.interrupt', payload: Record<string, unknown>) => {
+    const body: PostEventsRequest = { events: [{ type, payload }] };
+    await apiClient.post(`/v1/sessions/${sessionId}/events`, body);
+  };
 
   const handleSend = async () => {
     const trimmed = text.trim();
@@ -21,21 +30,32 @@ export default function MessageInput({ sessionId, disabled }: MessageInputProps)
     setError(null);
 
     try {
-      const body: PostEventsRequest = {
-        events: [
-          {
-            type: 'user.message',
-            payload: { content: trimmed },
-          },
-        ],
-      };
-      await apiClient.post(`/v1/sessions/${sessionId}/events`, body);
+      // While the agent is mid-turn the A4 gate only accepts steers
+      // (queued and injected at the next safe point), otherwise a normal message.
+      await postEvent(isRunning ? 'user.steer' : 'user.message', { content: trimmed });
       setText('');
     } catch (err) {
       const apiErr = err as ApiError;
       setError(apiErr.message || 'Failed to send message');
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleInterrupt = async () => {
+    if (interrupting || disabled) return;
+
+    setInterrupting(true);
+    setError(null);
+
+    try {
+      await postEvent('user.interrupt', text.trim() ? { reason: text.trim() } : {});
+      setText('');
+    } catch (err) {
+      const apiErr = err as ApiError;
+      setError(apiErr.message || 'Failed to interrupt');
+    } finally {
+      setInterrupting(false);
     }
   };
 
@@ -69,6 +89,11 @@ export default function MessageInput({ sessionId, disabled }: MessageInputProps)
 
   return (
     <div className="message-input-container" data-testid="message-input-container">
+      {isRunning && (
+        <div className="message-input-hint" data-testid="message-input-steer-hint">
+          Agent is running — messages are delivered as steers at the next safe point.
+        </div>
+      )}
       {error && (
         <div className="message-input-error" data-testid="message-input-error">
           {error}
@@ -91,8 +116,18 @@ export default function MessageInput({ sessionId, disabled }: MessageInputProps)
           disabled={sending || !text.trim()}
           data-testid="message-input-send"
         >
-          {sending ? 'Sending…' : 'Send'}
+          {sending ? 'Sending…' : isRunning ? 'Steer' : 'Send'}
         </button>
+        {isRunning && (
+          <button
+            className="message-input-interrupt"
+            onClick={handleInterrupt}
+            disabled={interrupting}
+            data-testid="message-input-interrupt"
+          >
+            {interrupting ? 'Interrupting…' : 'Interrupt'}
+          </button>
+        )}
       </div>
     </div>
   );

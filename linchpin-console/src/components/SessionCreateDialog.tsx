@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react';
 import { apiClient, ApiError } from '../api/client';
-import type { Agent, Environment, Vault, Session, PaginatedResponse } from '../types';
+import type {
+  Agent,
+  Environment,
+  Vault,
+  Session,
+  PaginatedResponse,
+  FileRecord,
+  SessionResourceConfig,
+} from '../types';
 import './SessionCreateDialog.css';
 
 interface SessionCreateDialogProps {
@@ -9,15 +17,37 @@ interface SessionCreateDialogProps {
   onCreated: (id: string) => void;
 }
 
+interface ResourceRow {
+  kind: 'file' | 'git_repository';
+  fileId: string;
+  mountPath: string;
+  gitUrl: string;
+  gitBranch: string;
+  gitToken: string;
+  gitShallow: boolean;
+}
+
+const emptyResourceRow = (): ResourceRow => ({
+  kind: 'file',
+  fileId: '',
+  mountPath: '',
+  gitUrl: '',
+  gitBranch: '',
+  gitToken: '',
+  gitShallow: true,
+});
+
 export default function SessionCreateDialog({ open, onClose, onCreated }: SessionCreateDialogProps) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [vaults, setVaults] = useState<Vault[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<FileRecord[]>([]);
   const [agentId, setAgentId] = useState('');
   const [environmentId, setEnvironmentId] = useState('');
   const [title, setTitle] = useState('');
   const [ttl, setTtl] = useState('');
   const [selectedVaultIds, setSelectedVaultIds] = useState<string[]>([]);
+  const [resourceRows, setResourceRows] = useState<ResourceRow[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,18 +59,22 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
     setTitle('');
     setTtl('');
     setSelectedVaultIds([]);
+    setResourceRows([]);
     setError(null);
 
     const load = async () => {
       try {
-        const [agentRes, envRes, vaultRes] = await Promise.all([
+        const [agentRes, envRes, vaultRes, fileRes] = await Promise.all([
           apiClient.get<PaginatedResponse<Agent>>('/v1/agents'),
           apiClient.get<PaginatedResponse<Environment>>('/v1/environments'),
           apiClient.get<PaginatedResponse<Vault>>('/v1/vaults'),
+          apiClient.get<PaginatedResponse<FileRecord>>('/v1/files?limit=100'),
         ]);
         setAgents(agentRes.data);
         setEnvironments(envRes.data);
         setVaults(vaultRes.data.filter(v => !v.archived_at));
+        // Only source='upload' files may be mounted (deliverables cannot be re-mounted)
+        setUploadedFiles(fileRes.data.filter(f => f.source === 'upload' && !f.archived_at));
       } catch (err) {
         const apiErr = err as ApiError;
         setError(apiErr.message || 'Failed to load agents or environments');
@@ -51,12 +85,41 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
 
   if (!open) return null;
 
+  const addResourceRow = () => setResourceRows([...resourceRows, emptyResourceRow()]);
+  const removeResourceRow = (index: number) =>
+    setResourceRows(resourceRows.filter((_, i) => i !== index));
+  const updateResourceRow = (index: number, patch: Partial<ResourceRow>) =>
+    setResourceRows(resourceRows.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!agentId || !environmentId) return;
 
     setSubmitting(true);
     setError(null);
+
+    // Build resources[] — vaults + file/git rows (vault_ids is deprecated server-side)
+    const resources: SessionResourceConfig[] = selectedVaultIds.map((vaultId) => ({
+      type: 'vault',
+      vault_id: vaultId,
+    }));
+    for (const row of resourceRows) {
+      if (row.kind === 'file' && row.fileId) {
+        const entry: SessionResourceConfig = { type: 'file', file_id: row.fileId };
+        if (row.mountPath.trim()) entry.mount_path = row.mountPath.trim();
+        resources.push(entry);
+      } else if (row.kind === 'git_repository' && row.gitUrl.trim() && row.mountPath.trim()) {
+        const entry: SessionResourceConfig = {
+          type: 'git_repository',
+          url: row.gitUrl.trim(),
+          mount_path: row.mountPath.trim(),
+          shallow: row.gitShallow,
+        };
+        if (row.gitBranch.trim()) entry.branch = row.gitBranch.trim();
+        if (row.gitToken.trim()) entry.authorization_token = row.gitToken.trim();
+        resources.push(entry);
+      }
+    }
 
     try {
       const body: Record<string, unknown> = {
@@ -65,7 +128,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
       };
       if (title.trim()) body.title = title.trim();
       if (ttl.trim()) body.ttl_seconds = Number(ttl);
-      if (selectedVaultIds.length > 0) body.vault_ids = selectedVaultIds;
+      if (resources.length > 0) body.resources = resources;
 
       const session = await apiClient.post<Session>('/v1/sessions', body);
       onCreated(session.id);
@@ -176,6 +239,103 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
                 ))
               )}
             </div>
+          </div>
+
+          <div className="form-field">
+            <label>Resource Mounts (optional)</label>
+            {resourceRows.map((row, i) => (
+              <div key={i} className="resource-row" data-testid="resource-row">
+                <select
+                  className="resource-kind"
+                  value={row.kind}
+                  onChange={e => updateResourceRow(i, { kind: e.target.value as ResourceRow['kind'] })}
+                  data-testid="resource-kind-select"
+                >
+                  <option value="file">File (uploaded)</option>
+                  <option value="git_repository">Git repository</option>
+                </select>
+                {row.kind === 'file' ? (
+                  <>
+                    <select
+                      value={row.fileId}
+                      onChange={e => updateResourceRow(i, { fileId: e.target.value })}
+                      data-testid="resource-file-select"
+                    >
+                      <option value="">Select uploaded file</option>
+                      {uploadedFiles.map(f => (
+                        <option key={f.id} value={f.id}>
+                          {f.filename} ({f.id.slice(0, 8)})
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="Mount path (optional)"
+                      value={row.mountPath}
+                      onChange={e => updateResourceRow(i, { mountPath: e.target.value })}
+                      data-testid="resource-mount-path"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      placeholder="https://github.com/org/repo.git"
+                      value={row.gitUrl}
+                      onChange={e => updateResourceRow(i, { gitUrl: e.target.value })}
+                      data-testid="resource-git-url"
+                    />
+                    <input
+                      type="text"
+                      placeholder="/src/repo (required)"
+                      value={row.mountPath}
+                      onChange={e => updateResourceRow(i, { mountPath: e.target.value })}
+                      data-testid="resource-git-mount"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Branch (optional)"
+                      value={row.gitBranch}
+                      onChange={e => updateResourceRow(i, { gitBranch: e.target.value })}
+                      data-testid="resource-git-branch"
+                    />
+                    <input
+                      type="password"
+                      placeholder="Token (optional)"
+                      value={row.gitToken}
+                      onChange={e => updateResourceRow(i, { gitToken: e.target.value })}
+                      data-testid="resource-git-token"
+                    />
+                    <label className="resource-shallow">
+                      <input
+                        type="checkbox"
+                        checked={row.gitShallow}
+                        onChange={e => updateResourceRow(i, { gitShallow: e.target.checked })}
+                        data-testid="resource-git-shallow"
+                      />
+                      Shallow clone
+                    </label>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="resource-remove"
+                  onClick={() => removeResourceRow(i)}
+                  aria-label="Remove resource"
+                  data-testid="resource-remove"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="resource-add-btn"
+              onClick={addResourceRow}
+              data-testid="resource-add"
+            >
+              + Add resource
+            </button>
           </div>
 
           {error && (

@@ -22,6 +22,7 @@ import zipfile
 from app.models import (
     SKILL_DESCRIPTION_MAX_LEN,
     SKILL_NAME_MAX_LEN,
+    SKILL_VERSION_MAX_LEN,
     validate_skill_name,
 )
 
@@ -236,16 +237,18 @@ def render_skills_system_prompt_block(
     return "\n".join(lines)
 
 
-def parse_skill_metadata(bundle_bytes: bytes) -> tuple[str, str]:
-    """Extract + validate ``(name, description)`` from a skill bundle.
+def parse_skill_metadata(bundle_bytes: bytes) -> tuple[str, str, str | None]:
+    """Extract + validate ``(name, description, version)`` from a bundle.
 
-    The frontmatter validators mirror the CLI's so upload + build paths
-    can't drift on what counts as valid.
+    ``version`` is optional frontmatter — ``None`` when the SKILL.md
+    doesn't declare one. The frontmatter validators mirror the CLI's so
+    upload + build paths can't drift on what counts as valid.
     """
     skill_md = read_skill_md(bundle_bytes)
     fm = _parse_frontmatter(skill_md)
     name = fm.get("name")
     description = fm.get("description")
+    version = fm.get("version") or None
     if not name:
         raise SkillBundleError("SKILL.md frontmatter is missing 'name'")
     if not description:
@@ -266,4 +269,9 @@ def parse_skill_metadata(bundle_bytes: bytes) -> tuple[str, str]:
         raise SkillBundleError(
             f"skill name must be ≤ {SKILL_NAME_MAX_LEN} chars"
         )
-    return name, description
+    if version is not None and len(version) > SKILL_VERSION_MAX_LEN:
+        raise SkillBundleError(
+            f"skill version must be ≤ {SKILL_VERSION_MAX_LEN} chars "
+            f"(got {len(version)})"
+        )
+    return name, description, version

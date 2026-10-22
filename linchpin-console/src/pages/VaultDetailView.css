@@ -144,3 +144,73 @@
   color: var(--color-danger);
   margin-top: var(--spacing-xs);
 }
+
+/* Credential card + inline edit panel wrapper */
+.credential-card-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+.section-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin: var(--spacing-xs) 0 0;
+  line-height: 1.4;
+}
+
+/* Edit secrets panel */
+.edit-secrets-panel {
+  padding: var(--spacing-md);
+  border-top: none;
+  border: 1px solid var(--color-border-light);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--color-bg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.edit-secrets-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.edit-secrets-field label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.edit-secrets-field input {
+  max-width: 420px;
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: 0.8125rem;
+  font-family: var(--font-mono);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+}
+
+.edit-secrets-field input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.edit-secrets-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.edit-secrets-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.edit-secrets-actions .btn-primary {
+  font-size: 0.8125rem;
+  padding: var(--spacing-sm) var(--spacing-md);
+}

@@ -10,7 +10,7 @@ export default function ErrorMessage({ status, message, onRetry }: ErrorMessageP
   return (
     <div className="error-message" data-testid="error-message" role="alert">
       <span className="error-message-status" data-testid="error-status">
-        Error {status}
+        {status ? `Error ${status}` : 'Connection error'}
       </span>
       <span className="error-message-text" data-testid="error-text">
         {message}

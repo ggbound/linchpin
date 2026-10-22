@@ -48,6 +48,56 @@
   cursor: default;
 }
 
+/* Live-stream connection badge */
+.event-stream-state {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  align-self: flex-end;
+  margin: var(--spacing-sm) var(--spacing-md) 0;
+  font-size: 0.6875rem;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: 999px;
+  padding: 2px 10px;
+  background: var(--color-bg-secondary);
+}
+
+.event-stream-state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
+.event-stream-state--live {
+  color: #1b5e20;
+}
+
+.event-stream-state--live .event-stream-state-dot {
+  background: #2e7d32;
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+.event-stream-state--reconnecting {
+  color: #8a6d00;
+}
+
+.event-stream-state--reconnecting .event-stream-state-dot {
+  background: #f9a825;
+  animation: pulse-dot 0.8s ease-in-out infinite;
+}
+
+.event-stream-state--connecting .event-stream-state-dot {
+  background: var(--color-text-muted);
+  animation: pulse-dot 0.8s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 /* Event bubbles */
 .event-bubble {
   max-width: 80%;

@@ -84,6 +84,11 @@
   color: var(--color-text-primary);
 }
 
+/* Keep row-nested links on a single line so their clickable area is contiguous. */
+.session-list-table td.cell-id a {
+  white-space: nowrap;
+}
+
 .session-row {
   cursor: pointer;
   transition: background-color 0.1s ease;

@@ -1,0 +1,147 @@
+.dream-list-view {
+  padding: var(--spacing-xl);
+}
+
+.dream-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--spacing-lg);
+}
+
+.dream-list-header h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: var(--spacing-xs);
+}
+
+.dream-list-header p {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  max-width: 640px;
+}
+
+.dream-action-error {
+  font-size: 0.75rem;
+  color: var(--color-danger);
+  margin-bottom: var(--spacing-sm);
+}
+
+.dream-filter-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.dream-filter-row label {
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+}
+
+.dream-filter-row select {
+  font-size: 0.8125rem;
+  padding: 4px 8px;
+}
+
+.dream-table-wrapper {
+  overflow-x: auto;
+}
+
+.dream-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.dream-table thead th {
+  text-align: left;
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.dream-table tbody td {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-text-primary);
+}
+
+.dream-table .empty-row {
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: var(--spacing-lg);
+}
+
+.dream-row {
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.dream-row:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+.dream-row:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.dream-entity-link {
+  color: var(--color-primary);
+}
+
+.dream-entity-link:hover {
+  text-decoration: underline;
+}
+
+.dream-actions-cell {
+  display: flex;
+  gap: var(--spacing-xs);
+}
+
+.dream-error-cell {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--color-danger);
+}
+
+.dream-status {
+  display: inline-block;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dream-status--pending {
+  background: rgba(180, 130, 20, 0.12);
+  color: #8a6410;
+}
+
+.dream-status--running {
+  background: rgba(37, 99, 235, 0.12);
+  color: #2563eb;
+}
+
+.dream-status--completed {
+  background: rgba(56, 122, 87, 0.12);
+  color: #2e6a4c;
+}
+
+.dream-status--failed {
+  background: rgba(184, 58, 26, 0.12);
+  color: var(--color-danger);
+}
+
+.dream-status--canceled {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
