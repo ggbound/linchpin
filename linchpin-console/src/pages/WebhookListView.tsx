@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { WebhookEndpoint, PaginatedResponse } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -9,6 +10,7 @@ import './WebhookListView.css';
 
 export default function WebhookListView() {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation('webhooks');
 
   const [endpoints, setEndpoints] = useState<WebhookEndpoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,7 +49,7 @@ export default function WebhookListView() {
       setDeleteTarget(null);
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to delete webhook endpoint');
+      setActionError(apiErr.message || t('listDeleteFailed'));
       setDeleteTarget(null);
     } finally {
       setDeleting(false);
@@ -70,15 +72,15 @@ export default function WebhookListView() {
     <div className="webhook-list-view" data-testid="webhook-list-view">
       <div className="webhook-list-header">
         <div>
-          <h1>Webhooks</h1>
-          <p>HTTP endpoints that receive event notifications when sessions change.</p>
+          <h1>{t('listTitle')}</h1>
+          <p>{t('listSubtitle')}</p>
         </div>
         <button
           className="btn-primary"
           onClick={() => navigate('/webhooks/new')}
           data-testid="new-webhook-btn"
         >
-          New webhook
+          {t('listNew')}
         </button>
       </div>
 
@@ -90,20 +92,18 @@ export default function WebhookListView() {
 
       {endpoints.length === 0 ? (
         <div className="webhook-empty" data-testid="webhook-empty">
-          <p className="empty-text">
-            No webhook endpoints yet. Create one to receive session and vault events.
-          </p>
+          <p className="empty-text">{t('listEmpty')}</p>
         </div>
       ) : (
         <div className="webhook-table-wrapper">
           <table className="webhook-table" data-testid="webhook-table">
             <thead>
               <tr>
-                <th>URL</th>
-                <th>Events</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th>Actions</th>
+                <th>{t('listColumnUrl')}</th>
+                <th>{t('listColumnEvents')}</th>
+                <th>{t('listColumnStatus')}</th>
+                <th>{t('common:created')}</th>
+                <th>{t('common:actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -129,20 +129,20 @@ export default function WebhookListView() {
                   <td>
                     {ep.enabled_events.length > 0 ? (
                       <span className="webhook-events-count">
-                        {ep.enabled_events.length} selected
+                        {t('listEventsSelected', { total: ep.enabled_events.length })}
                       </span>
                     ) : (
-                      <span className="webhook-events-default">default template</span>
+                      <span className="webhook-events-default">{t('listEventsDefault')}</span>
                     )}
                   </td>
                   <td>
                     <span
                       className={`webhook-enabled-badge ${ep.enabled ? 'is-enabled' : 'is-disabled'}`}
                     >
-                      {ep.enabled ? 'enabled' : 'disabled'}
+                      {ep.enabled ? t('common:enabled') : t('common:disabled')}
                     </span>
                   </td>
-                  <td>{new Date(ep.created_at).toLocaleString()}</td>
+                  <td>{new Date(ep.created_at).toLocaleString(i18n.language)}</td>
                   <td onClick={e => e.stopPropagation()}>
                     <button
                       className="btn-sm-danger"
@@ -150,7 +150,7 @@ export default function WebhookListView() {
                       onClick={() => setDeleteTarget(ep)}
                       data-testid="webhook-delete-btn"
                     >
-                      Delete
+                      {t('common:delete')}
                     </button>
                   </td>
                 </tr>
@@ -162,10 +162,10 @@ export default function WebhookListView() {
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Delete Webhook Endpoint"
+        title={t('listDeleteTitle')}
         message={
           deleteTarget
-            ? `Are you sure you want to delete ${deleteTarget.url}? Pending deliveries will not be retried.`
+            ? t('listDeleteMessage', { url: deleteTarget.url })
             : ''
         }
         onConfirm={handleDelete}

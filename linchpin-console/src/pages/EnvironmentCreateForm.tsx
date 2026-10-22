@@ -1,5 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError, extractValidationErrors, FieldValidationError } from '../api/client';
 import type {
   CreateEnvironmentRequest,
@@ -11,9 +12,9 @@ import type {
 import './EnvironmentCreateForm.css';
 
 const TIER_OPTIONS: { value: SandboxResourceTier; label: string }[] = [
-  { value: '1c2g', label: 'Small — 1 vCPU / 2 GB RAM' },
-  { value: '2c4g', label: 'Medium — 2 vCPU / 4 GB RAM' },
-  { value: '4c8g', label: 'Large — 4 vCPU / 8 GB RAM' },
+  { value: '1c2g', label: 'createTier1c2g' },
+  { value: '2c4g', label: 'createTier2c4g' },
+  { value: '4c8g', label: 'createTier4c8g' },
 ];
 
 const PACKAGE_MANAGERS: { key: keyof EnvironmentPackages; placeholder: string }[] = [
@@ -39,6 +40,7 @@ function parseList(input: string): string[] {
 
 export default function EnvironmentCreateForm() {
   const navigate = useNavigate();
+  const { t } = useTranslation('environments');
 
   const [name, setName] = useState('');
   const [tier, setTier] = useState<SandboxResourceTier>('1c2g');
@@ -125,7 +127,7 @@ export default function EnvironmentCreateForm() {
     } catch (err) {
       const apiErr = err as ApiError;
       setValidationErrors(extractValidationErrors(err));
-      setError(apiErr.message || 'Failed to create environment');
+      setError(apiErr.message || t('createFailed'));
       setSubmitting(false);
     }
   };
@@ -174,15 +176,15 @@ export default function EnvironmentCreateForm() {
   return (
     <div className="environment-create-form">
       <Link to="/environments" className="back-link">
-        ← Environments
+        ← {t('listTitle')}
       </Link>
-      <h1>Create Environment</h1>
+      <h1>{t('createTitle')}</h1>
 
       {error && (
         <div className="form-error" data-testid="form-error">
           <p>
             {validationErrors.length > 0
-              ? 'Request validation failed — fix the highlighted fields below.'
+              ? t('createValidationFailed')
               : error}
           </p>
           {unmappedErrors.length > 0 && (
@@ -199,25 +201,25 @@ export default function EnvironmentCreateForm() {
 
       <form onSubmit={handleSubmit}>
         <section className="form-section">
-          <h2>Basics</h2>
+          <h2>{t('createBasics')}</h2>
           <div className="form-field">
-            <label htmlFor="env-name">Name</label>
+            <label htmlFor="env-name">{t('common:name')}</label>
             <input
               id="env-name"
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
               required
-              placeholder="My Environment"
+              placeholder={t('createNamePlaceholder')}
             />
             {renderFieldErrors('name')}
           </div>
         </section>
 
         <section className="form-section">
-          <h2>Resources</h2>
+          <h2>{t('createResources')}</h2>
           <div className="form-field">
-            <label htmlFor="env-tier">Spec tier</label>
+            <label htmlFor="env-tier">{t('createSpecTier')}</label>
             <select
               id="env-tier"
               data-testid="env-tier"
@@ -226,23 +228,20 @@ export default function EnvironmentCreateForm() {
             >
               {TIER_OPTIONS.map(opt => (
                 <option key={opt.value} value={opt.value}>
-                  {opt.label}
+                  {t(opt.label)}
                 </option>
               ))}
             </select>
             {renderFieldErrors('config.resources')}
-            <p className="field-help">
-              CPU and memory allocated to every session sandbox created from this
-              environment.
-            </p>
+            <p className="field-help">{t('createTierHelp')}</p>
           </div>
         </section>
 
         <section className="form-section">
-          <h2>Networking</h2>
+          <h2>{t('createNetworking')}</h2>
           {renderFieldErrors('config.networking')}
           <div className="form-field">
-            <label htmlFor="networking-type">Network mode</label>
+            <label htmlFor="networking-type">{t('createNetworkMode')}</label>
             <select
               id="networking-type"
               data-testid="networking-type"
@@ -251,16 +250,16 @@ export default function EnvironmentCreateForm() {
                 setNetworkingType(e.target.value as 'none' | 'limited' | 'unrestricted')
               }
             >
-              <option value="none">None — no external access</option>
-              <option value="limited">Limited — allowlisted domains only</option>
-              <option value="unrestricted">Unrestricted — full access</option>
+              <option value="none">{t('createNetworkingNone')}</option>
+              <option value="limited">{t('createNetworkingLimited')}</option>
+              <option value="unrestricted">{t('createNetworkingUnrestricted')}</option>
             </select>
           </div>
 
           {networkingType === 'limited' && (
             <div className="limited-subform" data-testid="limited-subform">
               <div className="form-field">
-                <label htmlFor="allowed-hosts">Allowed hosts (one per line)</label>
+                <label htmlFor="allowed-hosts">{t('createAllowedHosts')}</label>
                 <textarea
                   id="allowed-hosts"
                   data-testid="allowed-hosts"
@@ -270,8 +269,9 @@ export default function EnvironmentCreateForm() {
                   placeholder={'api.github.com\n*.npmjs.org\nregistry.pypi.org'}
                 />
                 <p className="field-help">
-                  Domains routed through the egress proxy. Supports wildcard
-                  subdomains, e.g. <code>*.example.com</code>.
+                  {t('createAllowedHostsHelp1')}
+                  <code>*.example.com</code>
+                  {t('createAllowedHostsHelp2')}
                 </p>
               </div>
               <label className="checkbox-row">
@@ -281,9 +281,9 @@ export default function EnvironmentCreateForm() {
                   onChange={e => setAllowMcpServers(e.target.checked)}
                 />
                 <span>
-                  Allow curated MCP server domains
+                  {t('createAllowMcpDomains')}
                   <span className="checkbox-hint">
-                    Adds the egress rules required by registered MCP servers.
+                    {t('createAllowMcpDomainsHint')}
                   </span>
                 </span>
               </label>
@@ -294,10 +294,9 @@ export default function EnvironmentCreateForm() {
                   onChange={e => setAllowPackageManagers(e.target.checked)}
                 />
                 <span>
-                  Allow curated package manager domains
+                  {t('createAllowPackageDomains')}
                   <span className="checkbox-hint">
-                    Adds registry endpoints (PyPI, npm, crates.io, RubyGems, Go
-                    proxy, OS mirrors).
+                    {t('createAllowPackageDomainsHint')}
                   </span>
                 </span>
               </label>
@@ -306,10 +305,9 @@ export default function EnvironmentCreateForm() {
         </section>
 
         <section className="form-section">
-          <h2>Pre-installed packages</h2>
+          <h2>{t('createPreInstalledPackages')}</h2>
           <p className="field-help packages-lead">
-            Comma-separated package lists baked into the environment image at
-            creation time. Leave empty to skip.
+            {t('createPackagesLead')}
           </p>
           {renderFieldErrors('config.packages')}
           <div className="packages-grid">
@@ -331,7 +329,7 @@ export default function EnvironmentCreateForm() {
         </section>
 
         <section className="form-section">
-          <h2>Advanced</h2>
+          <h2>{t('createAdvanced')}</h2>
           {configOtherErrors.length > 0 && (
             <ul className="field-error" data-testid="field-error-config">
               {configOtherErrors.map((m, i) => (
@@ -340,37 +338,36 @@ export default function EnvironmentCreateForm() {
             </ul>
           )}
           <div className="form-field">
-            <label htmlFor="env-isolation">Isolation runtime</label>
+            <label htmlFor="env-isolation">{t('createIsolationRuntime')}</label>
             <select
               id="env-isolation"
               data-testid="env-isolation"
               value={isolation}
               onChange={e => setIsolation(e.target.value as SandboxIsolation)}
             >
-              <option value="docker">Docker container</option>
-              <option value="microvm">MicroVM (requires LINCHPIN_ENABLE_MICROVM)</option>
+              <option value="docker">{t('createIsolationDocker')}</option>
+              <option value="microvm">{t('createIsolationMicrovm')}</option>
             </select>
             {renderFieldErrors('config.isolation')}
           </div>
 
           <div className="form-field">
-            <label htmlFor="env-executor-node">Executor node</label>
+            <label htmlFor="env-executor-node">{t('createExecutorNode')}</label>
             <select
               id="env-executor-node"
               data-testid="env-executor-node"
               value={executorNode}
               onChange={e => setExecutorNode(e.target.value)}
             >
-              <option value="">Local (this server)</option>
+              <option value="">{t('createLocalExecutor')}</option>
               {executorNodes.map(node => (
                 <option key={node.id} value={node.name}>
-                  {node.name} ({node.status})
+                  {node.name} ({t(`status:${node.status}`, { defaultValue: String(node.status) })})
                 </option>
               ))}
             </select>
             <p className="field-help">
-              Pinning a node runs every session sandbox on that remote Docker
-              host; otherwise sandboxes run locally.
+              {t('createExecutorNodeHelp')}
             </p>
             {renderFieldErrors('config.executor_node')}
           </div>
@@ -382,10 +379,9 @@ export default function EnvironmentCreateForm() {
               onChange={e => setToolSearchEnabled(e.target.checked)}
             />
             <span>
-              Deferred tool loading (tool search)
+              {t('createToolSearch')}
               <span className="checkbox-hint">
-                For large tool catalogs, expose a search meta-tool instead of the
-                full list.
+                {t('createToolSearchHint')}
               </span>
             </span>
           </label>
@@ -394,7 +390,7 @@ export default function EnvironmentCreateForm() {
           {toolSearchEnabled && (
             <div className="inline-fields">
               <div className="form-field">
-                <label htmlFor="ts-threshold">Threshold (tools)</label>
+                <label htmlFor="ts-threshold">{t('createToolSearchThreshold')}</label>
                 <input
                   id="ts-threshold"
                   type="number"
@@ -404,7 +400,7 @@ export default function EnvironmentCreateForm() {
                 />
               </div>
               <div className="form-field">
-                <label htmlFor="ts-max-results">Max results per search</label>
+                <label htmlFor="ts-max-results">{t('createToolSearchMaxResults')}</label>
                 <input
                   id="ts-max-results"
                   type="number"
@@ -420,7 +416,7 @@ export default function EnvironmentCreateForm() {
 
         <div className="form-actions">
           <button type="submit" className="btn-submit" disabled={submitting}>
-            {submitting ? 'Creating…' : 'Create Environment'}
+            {submitting ? t('common:creating') : t('createTitle')}
           </button>
         </div>
       </form>

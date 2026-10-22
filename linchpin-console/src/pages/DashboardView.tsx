@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient } from '../api/client';
 import { resourceHref } from '../lib/resourceLinks';
 import type {
@@ -52,12 +53,13 @@ function pairStat(total: number, primary: number): PairStat {
   return { total, primary };
 }
 
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleString();
+function fmtTime(iso: string, lng: string): string {
+  return new Date(iso).toLocaleString(lng);
 }
 
 export default function DashboardView() {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation('dashboard');
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<Stats>({});
   const [agentNames, setAgentNames] = useState<Record<string, string>>({});
@@ -153,24 +155,24 @@ export default function DashboardView() {
   if (loading) return <LoadingSpinner />;
 
   const statCards: Array<{ key: string; label: string; to: string; stat?: CountStat | PairStat; primaryOf?: (s: CountStat | PairStat) => string; sub?: (s: CountStat | PairStat) => string }> = [
-    { key: 'agents', label: 'Agents', to: '/agents', stat: stats.agents, primaryOf: s => countLabel(s) },
-    { key: 'sessions', label: 'Sessions', to: '/sessions', stat: stats.sessions?.total, primaryOf: s => countLabel(s), sub: () => `${stats.sessions?.running ?? 0} running` },
-    { key: 'environments', label: 'Environments', to: '/environments', stat: stats.environments, primaryOf: s => countLabel(s) },
-    { key: 'memory-stores', label: 'Memory Stores', to: '/memory-stores', stat: stats.memoryStores, primaryOf: s => countLabel(s) },
-    { key: 'vaults', label: 'Credential Vaults', to: '/vaults', stat: stats.vaults, primaryOf: s => countLabel(s) },
-    { key: 'deployments', label: 'Active Deployments', to: '/deployments', stat: stats.deployments, primaryOf: s => String((s as PairStat).primary), sub: s => `${(s as PairStat).total} total` },
-    { key: 'dreams', label: 'Running Dreams', to: '/dreams', stat: stats.dreams, primaryOf: s => String((s as PairStat).primary), sub: s => `${(s as PairStat).total} total` },
-    { key: 'webhooks', label: 'Enabled Webhooks', to: '/webhooks', stat: stats.webhooks, primaryOf: s => String((s as PairStat).primary), sub: s => `${(s as PairStat).total} total` },
-    { key: 'skills', label: 'Skills', to: '/skills', stat: stats.skills, primaryOf: s => countLabel(s) },
-    { key: 'executor-nodes', label: 'Executor Nodes', to: '/executor-nodes', stat: stats.executorNodes, primaryOf: s => String((s as PairStat).primary), sub: s => `${(s as PairStat).total} total` },
+    { key: 'agents', label: t('agents'), to: '/agents', stat: stats.agents, primaryOf: s => countLabel(s) },
+    { key: 'sessions', label: t('sessions'), to: '/sessions', stat: stats.sessions?.total, primaryOf: s => countLabel(s), sub: () => t('sessionsRunning', { count: stats.sessions?.running ?? 0 }) },
+    { key: 'environments', label: t('environments'), to: '/environments', stat: stats.environments, primaryOf: s => countLabel(s) },
+    { key: 'memory-stores', label: t('memoryStores'), to: '/memory-stores', stat: stats.memoryStores, primaryOf: s => countLabel(s) },
+    { key: 'vaults', label: t('vaults'), to: '/vaults', stat: stats.vaults, primaryOf: s => countLabel(s) },
+    { key: 'deployments', label: t('activeDeployments'), to: '/deployments', stat: stats.deployments, primaryOf: s => String((s as PairStat).primary), sub: s => t('total', { count: (s as PairStat).total }) },
+    { key: 'dreams', label: t('runningDreams'), to: '/dreams', stat: stats.dreams, primaryOf: s => String((s as PairStat).primary), sub: s => t('total', { count: (s as PairStat).total }) },
+    { key: 'webhooks', label: t('enabledWebhooks'), to: '/webhooks', stat: stats.webhooks, primaryOf: s => String((s as PairStat).primary), sub: s => t('total', { count: (s as PairStat).total }) },
+    { key: 'skills', label: t('skills'), to: '/skills', stat: stats.skills, primaryOf: s => countLabel(s) },
+    { key: 'executor-nodes', label: t('executorNodes'), to: '/executor-nodes', stat: stats.executorNodes, primaryOf: s => String((s as PairStat).primary), sub: s => t('total', { count: (s as PairStat).total }) },
   ];
 
   return (
     <div className="dashboard-view" data-testid="dashboard-view">
       <div className="dashboard-header">
         <div>
-          <h1>Overview</h1>
-          <p>At-a-glance view of your Linchpin workspace.</p>
+          <h1>{t('title')}</h1>
+          <p>{t('subtitle')}</p>
         </div>
       </div>
 
@@ -192,42 +194,42 @@ export default function DashboardView() {
       </div>
 
       <div className="dashboard-quick-actions" data-testid="dashboard-quick-actions">
-        <h2>Quick actions</h2>
+        <h2>{t('quickActions')}</h2>
         <div className="dashboard-quick-actions-row">
           <button className="btn-primary" data-testid="quick-action-agent" onClick={() => navigate('/agents/new')}>
-            New agent
+            {t('newAgent')}
           </button>
           <button className="btn-secondary" data-testid="quick-action-environment" onClick={() => navigate('/environments/new')}>
-            New environment
+            {t('newEnvironment')}
           </button>
           <button className="btn-secondary" data-testid="quick-action-deployment" onClick={() => navigate('/deployments/new')}>
-            New deployment
+            {t('newDeployment')}
           </button>
           <button className="btn-secondary" data-testid="quick-action-dream" onClick={() => navigate('/dreams/new')}>
-            New dream
+            {t('newDream')}
           </button>
         </div>
       </div>
 
       <div className="dashboard-section">
         <div className="dashboard-section-header">
-          <h2>Recent sessions</h2>
-          <Link to="/sessions" className="dashboard-section-link">View all</Link>
+          <h2>{t('recentSessions')}</h2>
+          <Link to="/sessions" className="dashboard-section-link">{t('viewAll')}</Link>
         </div>
         <table className="dashboard-table" data-testid="recent-sessions-table">
           <thead>
             <tr>
-              <th>Session</th>
-              <th>Agent</th>
-              <th>Status</th>
-              <th>Created</th>
+              <th>{t('sessions')}</th>
+              <th>{t('agents')}</th>
+              <th>{t('status')}</th>
+              <th>{t('common:created')}</th>
             </tr>
           </thead>
           <tbody>
             {(stats.sessions?.recent ?? []).length === 0 ? (
               <tr>
                 <td colSpan={4} className="dashboard-empty" data-testid="recent-sessions-empty">
-                  No sessions yet.
+                  {t('noSessions')}
                 </td>
               </tr>
             ) : (
@@ -255,7 +257,7 @@ export default function DashboardView() {
                   <td>
                     <StatusBadge status={s.status} />
                   </td>
-                  <td>{fmtTime(s.created_at)}</td>
+                  <td>{fmtTime(s.created_at, i18n.language)}</td>
                 </tr>
               ))
             )}
@@ -265,23 +267,23 @@ export default function DashboardView() {
 
       <div className="dashboard-section">
         <div className="dashboard-section-header">
-          <h2>Recent audit events</h2>
-          <Link to="/audit" className="dashboard-section-link">View all</Link>
+          <h2>{t('recentAudit')}</h2>
+          <Link to="/audit" className="dashboard-section-link">{t('viewAll')}</Link>
         </div>
         <table className="dashboard-table" data-testid="recent-audit-table">
           <thead>
             <tr>
-              <th>Time</th>
-              <th>Actor</th>
-              <th>Action</th>
-              <th>Resource</th>
+              <th>{t('time')}</th>
+              <th>{t('actor')}</th>
+              <th>{t('action')}</th>
+              <th>{t('resource')}</th>
             </tr>
           </thead>
           <tbody>
             {(stats.audit ?? []).length === 0 ? (
               <tr>
                 <td colSpan={4} className="dashboard-empty" data-testid="recent-audit-empty">
-                  No audit events yet.
+                  {t('noAudit')}
                 </td>
               </tr>
             ) : (
@@ -290,7 +292,7 @@ export default function DashboardView() {
                 const label = `${e.resource_type}${e.resource_id ? ` · ${e.resource_id.slice(0, 8)}` : ''}`;
                 return (
                   <tr key={e.id} data-testid={`recent-audit-row-${e.id}`}>
-                    <td>{fmtTime(e.at)}</td>
+                    <td>{fmtTime(e.at, i18n.language)}</td>
                     <td>{e.actor || '—'}</td>
                     <td data-testid="recent-audit-cell-action"><code>{e.action}</code></td>
                     <td>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { Agent, AgentVersion, ModelConfig, SubagentConfig, UpdateAgentRequest } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -12,6 +13,7 @@ import './AgentDetailView.css';
 const MAX_SKILLS = 8;
 
 export default function AgentDetailView() {
+  const { t, i18n } = useTranslation('agents');
   const { id } = useParams<{ id: string }>();
   const [agent, setAgent] = useState<Agent | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,8 +59,8 @@ export default function AgentDetailView() {
     return apiClient
       .get<{ data: AgentVersion[] }>(`/v1/agents/${id}/versions?limit=20`)
       .then((res) => setVersions(res.data))
-      .catch(() => setVersionsError('Failed to load version history.'));
-  }, [id]);
+      .catch(() => setVersionsError(t('detailLoadVersionsFailed')));
+  }, [id, t]);
 
   useEffect(() => {
     setLoading(true);
@@ -140,7 +142,7 @@ export default function AgentDetailView() {
       fetchVersions();
     } catch (err) {
       const apiErr = err as ApiError;
-      setSaveError(apiErr.message || 'Failed to save changes');
+      setSaveError(apiErr.message || t('detailSaveFailed'));
     } finally {
       setSaving(false);
     }
@@ -155,7 +157,7 @@ export default function AgentDetailView() {
       const updated = await apiClient.post<Agent>(`/v1/agents/${id}/archive`, {});
       setAgent(updated);
     } catch (err) {
-      setArchiveError((err as ApiError).message || 'Failed to archive agent.');
+      setArchiveError((err as ApiError).message || t('detailArchiveFailed'));
     } finally {
       setArchiving(false);
     }
@@ -183,7 +185,7 @@ export default function AgentDetailView() {
   return (
     <div className="agent-detail-view" data-testid="agent-detail-view">
       <Link to="/agents" className="back-link" data-testid="back-link">
-        ← Agents
+        {t('detailBackToAgents')}
       </Link>
 
       <div className="agent-detail-header">
@@ -201,12 +203,12 @@ export default function AgentDetailView() {
           )}
           {isArchived && (
             <span className="archived-badge" data-testid="archived-badge">
-              Archived
+              {t('status:archived')}
             </span>
           )}
           {!editing && !isArchived && (
             <button className="btn-edit" onClick={enterEditMode} data-testid="edit-button">
-              Edit
+              {t('common:edit')}
             </button>
           )}
           {!editing && !isArchived && (
@@ -216,7 +218,7 @@ export default function AgentDetailView() {
               disabled={archiving}
               data-testid="archive-button"
             >
-              {archiving ? 'Archiving…' : 'Archive'}
+              {archiving ? t('detailArchiving') : t('detailArchive')}
             </button>
           )}
         </div>
@@ -225,10 +227,10 @@ export default function AgentDetailView() {
             <code>{agent.id}</code>
           </span>
           <span className="meta-separator">·</span>
-          <span data-testid="agent-version">Version {agent.version}</span>
+          <span data-testid="agent-version">{t('detailVersion', { version: agent.version })}</span>
           <span className="meta-separator">·</span>
           <span data-testid="agent-created">
-            Created {new Date(agent.created_at).toLocaleString()}
+            {t('detailCreatedAt', { time: new Date(agent.created_at).toLocaleString(i18n.language) })}
           </span>
         </div>
       </div>
@@ -246,11 +248,11 @@ export default function AgentDetailView() {
       )}
 
       <section className="detail-section" data-testid="model-config-section">
-        <h2>Model Configuration</h2>
+        <h2>{t('detailModelConfig')}</h2>
         {editing ? (
           <div className="edit-fields">
             <div className="edit-field">
-              <label htmlFor="edit-provider">Provider</label>
+              <label htmlFor="edit-provider">{t('detailProvider')}</label>
               <select
                 id="edit-provider"
                 value={editProvider}
@@ -262,7 +264,7 @@ export default function AgentDetailView() {
               </select>
             </div>
             <div className="edit-field">
-              <label htmlFor="edit-model-id">Model ID</label>
+              <label htmlFor="edit-model-id">{t('detailModelId')}</label>
               <input
                 id="edit-model-id"
                 type="text"
@@ -273,7 +275,7 @@ export default function AgentDetailView() {
             </div>
             {editProvider === 'ollama' && (
               <div className="edit-field">
-                <label htmlFor="edit-base-url">Base URL</label>
+                <label htmlFor="edit-base-url">{t('detailBaseUrl')}</label>
                 <input
                   id="edit-base-url"
                   type="text"
@@ -287,13 +289,13 @@ export default function AgentDetailView() {
           </div>
         ) : (
           <dl className="detail-grid">
-            <dt>Provider</dt>
+            <dt>{t('detailProvider')}</dt>
             <dd data-testid="model-provider">{agent.model.provider}</dd>
-            <dt>Model ID</dt>
+            <dt>{t('detailModelId')}</dt>
             <dd data-testid="model-id">{agent.model.id}</dd>
             {agent.model.base_url && (
               <>
-                <dt>Base URL</dt>
+                <dt>{t('detailBaseUrl')}</dt>
                 <dd data-testid="model-base-url">{agent.model.base_url}</dd>
               </>
             )}
@@ -302,13 +304,13 @@ export default function AgentDetailView() {
       </section>
 
       <section className="detail-section" data-testid="description-section">
-        <h2>Description</h2>
+        <h2>{t('common:description')}</h2>
         {editing ? (
           <textarea
             className="edit-description-textarea"
             value={editDescription}
             onChange={(e) => setEditDescription(e.target.value)}
-            placeholder="What does this agent do? (used by orchestrators to decide when to spawn it)"
+            placeholder={t('detailDescriptionPlaceholder')}
             rows={3}
             data-testid="edit-description-input"
           />
@@ -317,12 +319,12 @@ export default function AgentDetailView() {
             {agent.description}
           </p>
         ) : (
-          <p className="empty-text">No description.</p>
+          <p className="empty-text">{t('detailNoDescription')}</p>
         )}
       </section>
 
       <section className="detail-section" data-testid="system-prompt-section">
-        <h2>System Prompt</h2>
+        <h2>{t('detailSystemPrompt')}</h2>
         {editing ? (
           <textarea
             className="edit-system-textarea"
@@ -345,7 +347,7 @@ export default function AgentDetailView() {
             disabled={saving}
             data-testid="save-button"
           >
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? t('common:saving') : t('common:save')}
           </button>
           <button
             className="btn-cancel"
@@ -353,17 +355,14 @@ export default function AgentDetailView() {
             disabled={saving}
             data-testid="cancel-button"
           >
-            Cancel
+            {t('common:cancel')}
           </button>
         </div>
       )}
 
       <section className="detail-section" data-testid="skills-section">
-        <h2>Skills</h2>
-        <p className="section-hint">
-          Skill bundles installed on this agent, picked from the library (upload bundles on the
-          Skills page). Max {MAX_SKILLS}.
-        </p>
+        <h2>{t('detailSkills')}</h2>
+        <p className="section-hint">{t('detailSkillsHint', { max: MAX_SKILLS })}</p>
         {editing ? (
           <SkillsPicker
             value={editSkills}
@@ -372,7 +371,7 @@ export default function AgentDetailView() {
             max={MAX_SKILLS}
           />
         ) : agent.skills.length === 0 ? (
-          <p className="empty-text">No skills installed.</p>
+          <p className="empty-text">{t('detailNoSkills')}</p>
         ) : (
           <div className="skill-chip-row" data-testid="skills-list">
             {agent.skills.map((s) => (
@@ -390,12 +389,10 @@ export default function AgentDetailView() {
       </section>
 
       <section className="detail-section" data-testid="multi-agent-section">
-        <h2>Multi-Agent Subagents</h2>
+        <h2>{t('detailSubagentsTitle')}</h2>
         {editing ? (
           <>
-            <p className="section-hint">
-              Sub-agents this agent can spawn via the multi-agent tool (max 16, unique names).
-            </p>
+            <p className="section-hint">{t('detailSubagentsHint')}</p>
             <SubagentEditor
               value={editSubagents}
               onChange={setEditSubagents}
@@ -403,7 +400,7 @@ export default function AgentDetailView() {
             />
           </>
         ) : agent.multi_agents.length === 0 ? (
-          <p className="empty-text">No sub-agents configured.</p>
+          <p className="empty-text">{t('detailNoSubagents')}</p>
         ) : (
           <ul className="subagents-list">
             {agent.multi_agents.map((sub) => (
@@ -414,11 +411,11 @@ export default function AgentDetailView() {
                     {sub.agent_id}
                   </Link>
                 ) : (
-                  <span className="empty-text">no agent</span>
+                  <span className="empty-text">{t('detailNoAgent')}</span>
                 )}
                 {sub.environment_id && (
                   <Link to={`/environments/${sub.environment_id}`} className="subagent-link">
-                    env: {sub.environment_id}
+                    {t('detailEnvLabel', { id: sub.environment_id })}
                   </Link>
                 )}
                 {sub.description && (
@@ -431,9 +428,9 @@ export default function AgentDetailView() {
       </section>
 
       <section className="detail-section" data-testid="tools-section">
-        <h2>Tools</h2>
+        <h2>{t('detailTools')}</h2>
         {agent.tools.length === 0 ? (
-          <p className="empty-text">No tools configured.</p>
+          <p className="empty-text">{t('detailNoTools')}</p>
         ) : (
           <ul className="tools-list">
             {agent.tools.map((tool, idx) =>
@@ -441,7 +438,7 @@ export default function AgentDetailView() {
                 tool.configs.map((cfg) => (
                   <li key={`builtin-${idx}-${cfg.name}`} className="tool-item" data-testid="tool-item">
                     <span className="tool-name">{cfg.name}</span>
-                    <span className="tool-type">builtin</span>
+                    <span className="tool-type">{t('detailToolBuiltin')}</span>
                     <span
                       className={`tool-permission ${cfg.permission_policy}`}
                       data-testid="tool-permission"
@@ -453,7 +450,7 @@ export default function AgentDetailView() {
               ) : (
                 <li key={`custom-${idx}-${tool.name}`} className="tool-item" data-testid="tool-item">
                   <span className="tool-name">{tool.name}</span>
-                  <span className="tool-type">custom</span>
+                  <span className="tool-type">{t('detailToolCustom')}</span>
                   <span
                     className={`tool-permission ${tool.permission_policy}`}
                     data-testid="tool-permission"
@@ -468,22 +465,22 @@ export default function AgentDetailView() {
       </section>
 
       <section className="detail-section" data-testid="mcp-servers-section">
-        <h2>MCP Servers</h2>
+        <h2>{t('detailMcpServers')}</h2>
         {agent.mcp_servers.length === 0 ? (
-          <p className="empty-text">No MCP servers configured.</p>
+          <p className="empty-text">{t('detailNoMcpServers')}</p>
         ) : (
           <div className="mcp-servers-list">
             {agent.mcp_servers.map((server) => (
               <div key={server.name} className="mcp-server-card" data-testid="mcp-server-card">
                 <h3 data-testid="mcp-server-name">{server.name}</h3>
                 <dl className="detail-grid">
-                  <dt>Command</dt>
+                  <dt>{t('detailCommand')}</dt>
                   <dd data-testid="mcp-server-command">
                     <code>{server.command}</code>
                   </dd>
                   {server.args.length > 0 && (
                     <>
-                      <dt>Args</dt>
+                      <dt>{t('detailArgs')}</dt>
                       <dd data-testid="mcp-server-args">
                         <code>{server.args.join(' ')}</code>
                       </dd>
@@ -491,7 +488,7 @@ export default function AgentDetailView() {
                   )}
                   {Object.keys(server.env).length > 0 && (
                     <>
-                      <dt>Env</dt>
+                      <dt>{t('detailEnv')}</dt>
                       <dd data-testid="mcp-server-env">
                         {Object.entries(server.env).map(([k, v]) => (
                           <div key={k} className="env-entry">
@@ -511,21 +508,21 @@ export default function AgentDetailView() {
       </section>
 
       <section className="detail-section" data-testid="version-history-section">
-        <h2>Version History</h2>
+        <h2>{t('detailVersionHistory')}</h2>
         {versionsError ? (
           <p className="empty-text">{versionsError}</p>
         ) : versions === null ? (
           <LoadingSpinner />
         ) : versions.length === 0 ? (
-          <p className="empty-text">No versions recorded yet.</p>
+          <p className="empty-text">{t('detailNoVersions')}</p>
         ) : (
           <table className="versions-table">
             <thead>
               <tr>
-                <th>Version</th>
-                <th>Name</th>
-                <th>Model</th>
-                <th>Snapshot Time</th>
+                <th>{t('detailColVersion')}</th>
+                <th>{t('common:name')}</th>
+                <th>{t('detailColModel')}</th>
+                <th>{t('detailColSnapshotTime')}</th>
               </tr>
             </thead>
             <tbody>
@@ -536,7 +533,7 @@ export default function AgentDetailView() {
                   <td>
                     <code>{v.model.id}</code>
                   </td>
-                  <td>{new Date(v.snapshotted_at).toLocaleString()}</td>
+                  <td>{new Date(v.snapshotted_at).toLocaleString(i18n.language)}</td>
                 </tr>
               ))}
             </tbody>
@@ -546,8 +543,8 @@ export default function AgentDetailView() {
 
       <ConfirmDialog
         open={showArchiveConfirm}
-        title="Archive Agent"
-        message={`Archive "${agent.name}"? Archived agents cannot be edited or used in new sessions.`}
+        title={t('detailArchiveConfirmTitle')}
+        message={t('detailArchiveConfirmMessage', { name: agent.name })}
         onConfirm={handleArchive}
         onCancel={() => setShowArchiveConfirm(false)}
       />

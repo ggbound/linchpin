@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
 import { apiClient, ApiError } from '../api/client';
 import type { Agent, MemoryStore, Dream, PaginatedResponse } from '../types';
@@ -13,6 +14,7 @@ interface StoreListResponse {
 
 export default function DreamCreateForm() {
   const navigate = useNavigate();
+  const { t } = useTranslation('dreams');
 
   const [stores, setStores] = useState<MemoryStore[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -60,7 +62,7 @@ export default function DreamCreateForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (since && until && new Date(since) > new Date(until)) {
-      setCreateError('"Since" must be earlier than or equal to "Until".');
+      setCreateError(t('createSinceUntilError'));
       return;
     }
     setCreating(true);
@@ -74,7 +76,7 @@ export default function DreamCreateForm() {
       if (limit.trim()) {
         const n = Number(limit);
         if (!Number.isInteger(n) || n < 1 || n > 100) {
-          setCreateError('Session limit must be an integer between 1 and 100.');
+          setCreateError(t('createLimitError'));
           setCreating(false);
           return;
         }
@@ -93,11 +95,11 @@ export default function DreamCreateForm() {
       navigate(`/dreams/${created.id}`);
     } catch (err) {
       const apiErr = err as ApiError;
-      let message = apiErr.message || 'Failed to create dream';
+      let message = apiErr.message || t('createFailed');
       if (apiErr.status === 409) {
-        message = `A memory store named "${outputName.trim()}" already exists. Choose a different output name.`;
+        message = t('createNameConflict', { name: outputName.trim() });
       } else if (message.includes('dreamer_not_configured')) {
-        message = 'No dreamer agent is configured. Select a dreamer agent explicitly or set LINCHPIN_DREAMER_AGENT_ID.';
+        message = t('createDreamerNotConfigured');
       }
       setCreateError(message);
       setCreating(false);
@@ -123,19 +125,16 @@ export default function DreamCreateForm() {
   return (
     <div className="dream-create-view" data-testid="dream-create-view">
       <Link to="/dreams" className="back-link" data-testid="back-link">
-        ← Dreams
+        ← {t('createBack')}
       </Link>
 
-      <h1 className="dream-create-title">New Dream</h1>
-      <p className="dream-create-subtitle">
-        Launch a dreamer agent that reads past sessions and writes a curated memory
-        store. Dreams are a v0.7.0 research preview.
-      </p>
+      <h1 className="dream-create-title">{t('createTitle')}</h1>
+      <p className="dream-create-subtitle">{t('createSubtitle')}</p>
 
       <form className="dream-form" onSubmit={handleSubmit} data-testid="dream-create-form">
         <div className="dream-form-row">
           <div className="form-field">
-            <label htmlFor="dream-input-store">Input Memory Store</label>
+            <label htmlFor="dream-input-store">{t('createInputStoreLabel')}</label>
             <select
               id="dream-input-store"
               value={inputStoreId}
@@ -143,17 +142,17 @@ export default function DreamCreateForm() {
               required
               data-testid="dream-input-store-select"
             >
-              {stores.length === 0 && <option value="">No memory stores available</option>}
+              {stores.length === 0 && <option value="">{t('createNoStores')}</option>}
               {stores.map(s => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
             <p className="section-hint">
-              The store the dreamer agent reads source memories from.
+              {t('createInputStoreHint')}
             </p>
           </div>
           <div className="form-field">
-            <label htmlFor="dream-output-name">Output Store Name</label>
+            <label htmlFor="dream-output-name">{t('createOutputNameLabel')}</label>
             <input
               id="dream-output-name"
               type="text"
@@ -164,54 +163,51 @@ export default function DreamCreateForm() {
               data-testid="dream-output-name-input"
             />
             <p className="section-hint">
-              The dreamer agent creates this store in the workspace. Must not match an
-              existing store name.
+              {t('createOutputNameHint')}
             </p>
           </div>
         </div>
 
         <div className="form-field">
-          <label htmlFor="dream-agent">Dreamer Agent (optional)</label>
+          <label htmlFor="dream-agent">{t('createDreamerAgentLabel')}</label>
           <select
             id="dream-agent"
             value={dreamerAgentId}
             onChange={e => setDreamerAgentId(e.target.value)}
             data-testid="dream-agent-select"
           >
-            <option value="">Platform default</option>
+            <option value="">{t('createPlatformDefault')}</option>
             {agents.map(a => (
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </select>
           <p className="section-hint">
-            Overrides LINCHPIN_DREAMER_AGENT_ID for this run. Required if no default
-            dreamer is configured.
+            {t('createDreamerAgentHint')}
           </p>
         </div>
 
         <div className="dream-filter-section">
-          <h2>Session Filter (optional)</h2>
+          <h2>{t('createSessionFilterTitle')}</h2>
           <p className="section-hint">
-            Restrict which past sessions the dreamer curates. All set fields are
-            combined; leave everything empty to curate every session (capped at 100).
+            {t('createSessionFilterHint')}
           </p>
           <div className="dream-form-row">
             <div className="form-field">
-              <label htmlFor="dream-filter-agent">Agent</label>
+              <label htmlFor="dream-filter-agent">{t('createFilterAgentLabel')}</label>
               <select
                 id="dream-filter-agent"
                 value={filterAgentId}
                 onChange={e => setFilterAgentId(e.target.value)}
                 data-testid="dream-filter-agent-select"
               >
-                <option value="">Any agent</option>
+                <option value="">{t('createAnyAgent')}</option>
                 {agents.map(a => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
               </select>
             </div>
             <div className="form-field">
-              <label htmlFor="dream-filter-limit">Session Limit</label>
+              <label htmlFor="dream-filter-limit">{t('createSessionLimitLabel')}</label>
               <input
                 id="dream-filter-limit"
                 type="number"
@@ -226,7 +222,7 @@ export default function DreamCreateForm() {
           </div>
           <div className="dream-form-row">
             <div className="form-field">
-              <label htmlFor="dream-filter-since">Since (optional)</label>
+              <label htmlFor="dream-filter-since">{t('createSinceLabel')}</label>
               <input
                 id="dream-filter-since"
                 type="datetime-local"
@@ -236,7 +232,7 @@ export default function DreamCreateForm() {
               />
             </div>
             <div className="form-field">
-              <label htmlFor="dream-filter-until">Until (optional)</label>
+              <label htmlFor="dream-filter-until">{t('createUntilLabel')}</label>
               <input
                 id="dream-filter-until"
                 type="datetime-local"
@@ -261,9 +257,9 @@ export default function DreamCreateForm() {
             disabled={creating || !inputStoreId || !outputName.trim()}
             data-testid="dream-create-submit"
           >
-            {creating ? 'Creating…' : 'Create dream'}
+            {creating ? t('common:creating') : t('createSubmit')}
           </button>
-          <Link to="/dreams" className="btn-cancel-link">Cancel</Link>
+          <Link to="/dreams" className="btn-cancel-link">{t('common:cancel')}</Link>
         </div>
       </form>
     </div>

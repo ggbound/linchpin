@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { Agent, PaginatedResponse } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -7,25 +8,27 @@ import ErrorMessage from '../components/ErrorMessage';
 import Pagination from '../components/Pagination';
 import './AgentListView.css';
 
-function formatRelativeTime(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diffMs = now - then;
-  const diffSec = Math.floor(diffMs / 1000);
-
-  if (diffSec < 60) return 'just now';
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin} minute${diffMin === 1 ? '' : 's'} ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr} hour${diffHr === 1 ? '' : 's'} ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 30) return `${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
-
-  return new Date(dateStr).toLocaleDateString();
-}
-
 export default function AgentListView() {
+  const { t, i18n } = useTranslation('agents');
   const navigate = useNavigate();
+
+  const formatRelativeTime = (dateStr: string): string => {
+    const now = Date.now();
+    const then = new Date(dateStr).getTime();
+    const diffMs = now - then;
+    const diffSec = Math.floor(diffMs / 1000);
+
+    if (diffSec < 60) return t('time:justNow');
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return t('time:minutesAgo', { count: diffMin });
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return t('time:hoursAgo', { count: diffHr });
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 7) return t('time:daysAgo', { count: diffDay });
+    if (diffDay < 30) return t('time:weeksAgo', { count: Math.floor(diffDay / 7) });
+
+    return new Date(dateStr).toLocaleDateString(i18n.language);
+  };
 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,15 +93,15 @@ export default function AgentListView() {
     <div className="agent-list-view" data-testid="agent-list-view">
       <div className="agent-list-header">
         <div>
-          <h1>Agents</h1>
-          <p>Create and manage autonomous agents.</p>
+          <h1>{t('listTitle')}</h1>
+          <p>{t('listSubtitle')}</p>
         </div>
         <button
           className="btn-primary"
           data-testid="new-agent-btn"
           onClick={() => navigate('/agents/new')}
         >
-          New agent
+          {t('listNewAgent')}
         </button>
       </div>
 
@@ -106,11 +109,11 @@ export default function AgentListView() {
         <input
           type="text"
           className="search-input"
-          placeholder="Go to agent ID"
+          placeholder={t('listSearchPlaceholder')}
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           data-testid="agent-search-input"
-          aria-label="Search agents by ID"
+          aria-label={t('listSearchAriaLabel')}
         />
       </div>
 
@@ -118,17 +121,17 @@ export default function AgentListView() {
         <table className="agent-list-table" data-testid="agent-table">
           <thead>
             <tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>Model</th>
-              <th>Created</th>
+              <th>{t('common:id')}</th>
+              <th>{t('common:name')}</th>
+              <th>{t('listColModel')}</th>
+              <th>{t('common:created')}</th>
             </tr>
           </thead>
           <tbody>
             {filteredAgents.length === 0 ? (
               <tr>
                 <td colSpan={4} className="empty-row">
-                  {searchQuery ? 'No agents match your search.' : 'No agents yet.'}
+                  {searchQuery ? t('listNoMatch') : t('listEmpty')}
                 </td>
               </tr>
             ) : (

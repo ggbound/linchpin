@@ -1,0 +1,14 @@
+{
+  "connecting": "连接中…",
+  "live": "实时",
+  "reconnecting": "重新连接中…",
+  "closed": "离线",
+  "unknownTool": "未知工具",
+  "anErrorOccurred": "发生错误",
+  "noEvents": "暂无事件",
+  "toolUse": "工具调用",
+  "toolResult": "工具结果",
+  "mcpToolUse": "MCP 工具调用",
+  "mcpToolResult": "MCP 工具结果",
+  "customToolUse": "自定义工具调用"
+}

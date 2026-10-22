@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { setApiKey } from '../api/client';
 import './ApiKeyInput.css';
 
@@ -7,6 +8,7 @@ interface ApiKeyInputProps {
 }
 
 export default function ApiKeyInput({ onKeySet }: ApiKeyInputProps) {
+  const { t } = useTranslation('apiKeyInput');
   const [key, setKey] = useState('');
 
   const handleSubmit = (e: FormEvent) => {
@@ -20,9 +22,9 @@ export default function ApiKeyInput({ onKeySet }: ApiKeyInputProps) {
   return (
     <div className="api-key-screen">
       <form className="api-key-card" onSubmit={handleSubmit}>
-        <h1>Linchpin Console</h1>
-        <p>Enter your Linchpin API key to get started.</p>
-        <label htmlFor="api-key-input">API Key</label>
+        <h1>{t('consoleTitle')}</h1>
+        <p>{t('subtitle')}</p>
+        <label htmlFor="api-key-input">{t('apiKey')}</label>
         <input
           id="api-key-input"
           type="password"
@@ -32,7 +34,7 @@ export default function ApiKeyInput({ onKeySet }: ApiKeyInputProps) {
           autoFocus
         />
         <button type="submit" disabled={!key.trim()}>
-          Connect
+          {t('connect')}
         </button>
       </form>
     </div>

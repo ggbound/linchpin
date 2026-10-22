@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type {
   Deployment,
@@ -20,6 +21,7 @@ import './DeploymentDetailView.css';
 
 export default function DeploymentDetailView() {
   const { id } = useParams<{ id: string }>();
+  const { t, i18n } = useTranslation('deployments');
 
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [agentName, setAgentName] = useState<string | null>(null);
@@ -96,7 +98,7 @@ export default function DeploymentDetailView() {
       setDeployment(updated);
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to update deployment');
+      setActionError(apiErr.message || t('detailActionFailed'));
     } finally {
       setToggling(false);
     }
@@ -119,7 +121,7 @@ export default function DeploymentDetailView() {
   const handleEditSave = async () => {
     if (!deployment || saving) return;
     if (editCronInvalid) {
-      setActionError('Invalid cron expression — expected 5 space-separated fields, e.g. 0 9 * * 1-5.');
+      setActionError(t('detailInvalidCron'));
       return;
     }
     setSaving(true);
@@ -134,12 +136,12 @@ export default function DeploymentDetailView() {
       try {
         parsed = JSON.parse(editEventsJson);
       } catch {
-        setActionError('Initial events must be valid JSON.');
+        setActionError(t('detailEventsInvalidJson'));
         setSaving(false);
         return;
       }
       if (!Array.isArray(parsed)) {
-        setActionError('Initial events must be a JSON array.');
+        setActionError(t('detailEventsMustBeArray'));
         setSaving(false);
         return;
       }
@@ -147,7 +149,7 @@ export default function DeploymentDetailView() {
       for (const item of parsed) {
         const ev = item as Partial<InitialEventConfig>;
         if (!ev || (ev.type !== 'user.message' && ev.type !== 'user.steer') || typeof ev.payload !== 'object' || ev.payload === null) {
-          setActionError('Each event needs a type ("user.message" or "user.steer") and a payload object.');
+          setActionError(t('detailEventNeedsTypeAndPayload'));
           setSaving(false);
           return;
         }
@@ -165,7 +167,7 @@ export default function DeploymentDetailView() {
       setEditing(false);
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to update deployment');
+      setActionError(apiErr.message || t('detailActionFailed'));
     } finally {
       setSaving(false);
     }
@@ -181,7 +183,7 @@ export default function DeploymentDetailView() {
       setShowArchiveConfirm(false);
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to archive deployment');
+      setActionError(apiErr.message || t('detailArchiveFailed'));
       setShowArchiveConfirm(false);
     } finally {
       setArchiving(false);
@@ -215,27 +217,27 @@ export default function DeploymentDetailView() {
   return (
     <div className="deployment-detail-view" data-testid="deployment-detail-view">
       <Link to="/deployments" className="back-link" data-testid="back-link">
-        ← Deployments
+        ← {t('listTitle')}
       </Link>
 
       <div className="deployment-detail-header">
         <div className="deployment-detail-title-row">
           <h1 data-testid="deployment-title">
-            Deployment <code>{deployment.id.slice(0, 8)}</code>
+            {t('detailTitle')} <code>{deployment.id.slice(0, 8)}</code>
           </h1>
           <span className={`deployment-status deployment-status--${deployment.status}`} data-testid="deployment-status">
-            {deployment.status}
+            {t(`status:${deployment.status}`, { defaultValue: deployment.status })}
           </span>
           {isArchived && (
-            <span className="archived-badge" data-testid="archived-badge">Archived</span>
+            <span className="archived-badge" data-testid="archived-badge">{t('status:archived')}</span>
           )}
         </div>
         <div className="deployment-detail-meta">
-          <span>Created {new Date(deployment.created_at).toLocaleString()}</span>
+          <span>{t('detailCreatedAt', { time: new Date(deployment.created_at).toLocaleString(i18n.language) })}</span>
           {deployment.archived_at && (
             <>
               <span className="meta-separator">·</span>
-              <span>Archived {new Date(deployment.archived_at).toLocaleString()}</span>
+              <span>{t('detailArchivedAt', { time: new Date(deployment.archived_at).toLocaleString(i18n.language) })}</span>
             </>
           )}
         </div>
@@ -256,7 +258,7 @@ export default function DeploymentDetailView() {
               onClick={handleToggle}
               data-testid={isActive ? 'deployment-pause-btn' : 'deployment-resume-btn'}
             >
-              {toggling ? 'Working…' : isActive ? 'Pause' : 'Resume'}
+              {toggling ? t('detailWorking') : isActive ? t('detailPause') : t('detailResume')}
             </button>
             <button
               className="btn-archive"
@@ -264,7 +266,7 @@ export default function DeploymentDetailView() {
               onClick={() => setShowArchiveConfirm(true)}
               data-testid="deployment-archive-btn"
             >
-              Archive
+              {t('detailArchive')}
             </button>
           </>
         )}
@@ -272,21 +274,21 @@ export default function DeploymentDetailView() {
 
       <section className="detail-section" data-testid="deployment-info-section">
         <h2>
-          Configuration
+          {t('detailConfiguration')}
           {!editing && !isArchived && (
             <button
               className="btn-edit"
               onClick={enterEditMode}
               data-testid="deployment-edit-btn"
             >
-              Edit
+              {t('common:edit')}
             </button>
           )}
         </h2>
         {editing ? (
           <div className="edit-fields" data-testid="deployment-edit-form">
             <div className="edit-field">
-              <label htmlFor="dep-edit-cron">Cron Schedule</label>
+              <label htmlFor="dep-edit-cron">{t('detailCronSchedule')}</label>
               <input
                 id="dep-edit-cron"
                 type="text"
@@ -296,16 +298,16 @@ export default function DeploymentDetailView() {
                 data-testid="deployment-edit-cron"
               />
               <span className="edit-field-hint">
-                Changing the schedule recomputes the next run time from now.
+                {t('detailCronHint')}
               </span>
               {editCronInvalid && (
                 <div className="form-error" role="alert" data-testid="deployment-edit-cron-error">
-                  Invalid cron expression — expected 5 space-separated fields, e.g. 0 9 * * 1-5.
+                  {t('detailInvalidCron')}
                 </div>
               )}
             </div>
             <div className="edit-field">
-              <label htmlFor="dep-edit-timezone">Timezone</label>
+              <label htmlFor="dep-edit-timezone">{t('detailTimezone')}</label>
               <select
                 id="dep-edit-timezone"
                 value={editTimezone}
@@ -321,10 +323,10 @@ export default function DeploymentDetailView() {
                   </option>
                 ))}
               </select>
-              <span className="edit-field-hint">IANA timezone used to evaluate the cron schedule.</span>
+              <span className="edit-field-hint">{t('detailTimezoneHint')}</span>
             </div>
             <div className="edit-field">
-              <label htmlFor="dep-edit-events">Initial Events (JSON)</label>
+              <label htmlFor="dep-edit-events">{t('detailInitialEventsJson')}</label>
               <textarea
                 id="dep-edit-events"
                 className="dep-events-textarea"
@@ -335,7 +337,7 @@ export default function DeploymentDetailView() {
                 data-testid="deployment-edit-events"
               />
               <span className="edit-field-hint">
-                Array of {"{"}&quot;type&quot;: &quot;user.message&quot; | &quot;user.steer&quot;, &quot;payload&quot;: {"{...}"}{"}"}. Use [] for none.
+                {t('detailEventsHint')}
               </span>
             </div>
             <div className="edit-actions">
@@ -345,7 +347,7 @@ export default function DeploymentDetailView() {
                 disabled={saving || editCronInvalid}
                 data-testid="deployment-edit-save"
               >
-                {saving ? 'Saving…' : 'Save'}
+                {saving ? t('common:saving') : t('common:save')}
               </button>
               <button
                 className="btn-cancel"
@@ -353,32 +355,32 @@ export default function DeploymentDetailView() {
                 disabled={saving}
                 data-testid="deployment-edit-cancel"
               >
-                Cancel
+                {t('common:cancel')}
               </button>
             </div>
           </div>
         ) : (
           <dl className="detail-grid">
-          <dt>Agent</dt>
+          <dt>{t('detailFieldAgent')}</dt>
           <dd>
             <Link to={`/agents/${deployment.agent_id}`} data-testid="deployment-agent-link">
               {agentName || deployment.agent_id}
             </Link>
           </dd>
-          <dt>Environment</dt>
+          <dt>{t('detailFieldEnvironment')}</dt>
           <dd>
             <Link to={`/environments/${deployment.environment_id}`} data-testid="deployment-env-link">
               {envName || deployment.environment_id}
             </Link>
           </dd>
-          <dt>Cron</dt>
+          <dt>{t('detailFieldCron')}</dt>
           <dd><code>{deployment.cron}</code></dd>
-          <dt>Timezone</dt>
+          <dt>{t('detailFieldTimezone')}</dt>
           <dd>{deployment.timezone}</dd>
-          <dt>Next Run</dt>
+          <dt>{t('detailFieldNextRun')}</dt>
           <dd data-testid="deployment-next-run">
             {isActive && deployment.next_run_at
-              ? new Date(deployment.next_run_at).toLocaleString()
+              ? new Date(deployment.next_run_at).toLocaleString(i18n.language)
               : '—'}
           </dd>
           </dl>
@@ -387,7 +389,7 @@ export default function DeploymentDetailView() {
 
       {deployment.initial_events.length > 0 && (
         <section className="detail-section" data-testid="deployment-events-section">
-          <h2>Initial Events</h2>
+          <h2>{t('detailInitialEvents')}</h2>
           <ul className="dep-events-list">
             {deployment.initial_events.map((ev, i) => (
               <li key={i} className="dep-events-item" data-testid="deployment-initial-event">
@@ -403,27 +405,27 @@ export default function DeploymentDetailView() {
 
       <section className="detail-section" data-testid="runs-section">
         <h2>
-          Run History ({runs.length})
+          {t('detailRunHistory', { total: runs.length })}
           <button
             className="btn-refresh"
             onClick={fetchRuns}
             disabled={runsLoading}
             data-testid="runs-refresh-btn"
           >
-            Refresh
+            {t('common:refresh')}
           </button>
         </h2>
         {runsLoading ? (
           <LoadingSpinner />
         ) : runs.length === 0 ? (
-          <p className="empty-text">No sessions have been triggered by this deployment yet.</p>
+          <p className="empty-text">{t('detailNoRuns')}</p>
         ) : (
           <table className="runs-table">
             <thead>
               <tr>
-                <th>Title</th>
-                <th>Status</th>
-                <th>Created</th>
+                <th>{t('detailColumnTitle')}</th>
+                <th>{t('detailColumnStatus')}</th>
+                <th>{t('common:created')}</th>
               </tr>
             </thead>
             <tbody>
@@ -433,7 +435,7 @@ export default function DeploymentDetailView() {
                     <Link to={`/sessions/${run.id}`}>{run.title || run.id.slice(0, 8)}</Link>
                   </td>
                   <td><StatusBadge status={run.status} /></td>
-                  <td>{new Date(run.created_at).toLocaleString()}</td>
+                  <td>{new Date(run.created_at).toLocaleString(i18n.language)}</td>
                 </tr>
               ))}
             </tbody>
@@ -443,8 +445,8 @@ export default function DeploymentDetailView() {
 
       <ConfirmDialog
         open={showArchiveConfirm}
-        title="Archive Deployment"
-        message="Are you sure you want to archive this deployment? It will stop triggering new runs."
+        title={t('detailArchiveTitle')}
+        message={t('detailArchiveMessage')}
         onConfirm={handleArchive}
         onCancel={() => setShowArchiveConfirm(false)}
       />

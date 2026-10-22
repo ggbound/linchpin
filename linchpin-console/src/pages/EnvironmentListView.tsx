@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { Environment, PaginatedResponse } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -7,25 +8,26 @@ import ErrorMessage from '../components/ErrorMessage';
 import Pagination from '../components/Pagination';
 import './EnvironmentListView.css';
 
-function formatRelativeTime(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diffMs = now - then;
-  const diffSec = Math.floor(diffMs / 1000);
-
-  if (diffSec < 60) return 'just now';
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin} minute${diffMin === 1 ? '' : 's'} ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr} hour${diffHr === 1 ? '' : 's'} ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 30) return `${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
-
-  return new Date(dateStr).toLocaleDateString();
-}
-
 export default function EnvironmentListView() {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation('environments');
+
+  const formatRelativeTime = (dateStr: string): string => {
+    const now = Date.now();
+    const then = new Date(dateStr).getTime();
+    const diffMs = now - then;
+    const diffSec = Math.floor(diffMs / 1000);
+
+    if (diffSec < 60) return t('time:justNow');
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return t('time:minutesAgo', { count: diffMin });
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return t('time:hoursAgo', { count: diffHr });
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 30) return t('time:daysAgo', { count: diffDay });
+
+    return new Date(dateStr).toLocaleDateString(i18n.language);
+  };
 
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,15 +87,15 @@ export default function EnvironmentListView() {
     <div className="environment-list-view" data-testid="environment-list-view">
       <div className="environment-list-header">
         <div>
-          <h1>Environments</h1>
-          <p>Create and manage container environments.</p>
+          <h1>{t('listTitle')}</h1>
+          <p>{t('listSubtitle')}</p>
         </div>
         <button
           className="btn-primary"
           data-testid="new-environment-btn"
           onClick={() => navigate('/environments/new')}
         >
-          New environment
+          {t('listNewEnvironment')}
         </button>
       </div>
 
@@ -101,18 +103,18 @@ export default function EnvironmentListView() {
         <table className="environment-list-table" data-testid="environment-table">
           <thead>
             <tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>Spec</th>
-              <th>Networking</th>
-              <th>Created</th>
+              <th>{t('common:id')}</th>
+              <th>{t('common:name')}</th>
+              <th>{t('listSpec')}</th>
+              <th>{t('listNetworking')}</th>
+              <th>{t('common:created')}</th>
             </tr>
           </thead>
           <tbody>
             {environments.length === 0 ? (
               <tr>
                 <td colSpan={5} className="empty-row">
-                  No environments yet.
+                  {t('listEmpty')}
                 </td>
               </tr>
             ) : (

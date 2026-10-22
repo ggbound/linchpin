@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import './ConfirmDialog.css';
 
 interface ConfirmDialogProps {
@@ -9,6 +10,8 @@ interface ConfirmDialogProps {
 }
 
 export default function ConfirmDialog({ title, message, onConfirm, onCancel, open }: ConfirmDialogProps) {
+  const { t } = useTranslation('common');
+
   if (!open) return null;
 
   return (
@@ -29,14 +32,14 @@ export default function ConfirmDialog({ title, message, onConfirm, onCancel, ope
             onClick={onCancel}
             data-testid="confirm-cancel"
           >
-            Cancel
+            {t('cancel')}
           </button>
           <button
             className="confirm-dialog-confirm"
             onClick={onConfirm}
             data-testid="confirm-confirm"
           >
-            Confirm
+            {t('confirm')}
           </button>
         </div>
       </div>

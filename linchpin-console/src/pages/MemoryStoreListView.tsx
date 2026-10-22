@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { apiClient, ApiError } from '../api/client';
 import type { MemoryStore } from '../types';
@@ -13,6 +14,7 @@ interface StoreListResponse {
 
 export default function MemoryStoreListView() {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation('memoryStores');
 
   const [stores, setStores] = useState<MemoryStore[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,15 +61,15 @@ export default function MemoryStoreListView() {
       setShowCreate(false);
       setName('');
       setDescription('');
-      setNotice(`Memory store "${created.name}" created.`);
+      setNotice(t('listCreatedNotice', { name: created.name }));
       setStores(prev => [created, ...prev]);
       navigate(`/memory-stores/${created.id}`);
     } catch (err) {
       const apiErr = err as ApiError;
       setActionError(
         apiErr.status === 409
-          ? `A memory store named "${name.trim()}" already exists.`
-          : apiErr.message || 'Failed to create memory store',
+          ? t('listNameConflict', { name: name.trim() })
+          : apiErr.message || t('listCreateFailed'),
       );
     } finally {
       setCreating(false);
@@ -90,11 +92,8 @@ export default function MemoryStoreListView() {
     <div className="memory-store-list-view" data-testid="memory-store-list-view">
       <div className="memory-store-list-header">
         <div>
-          <h1>Memory Stores</h1>
-          <p>
-            Persistent, path-addressed memory that sessions mount and read/write.
-            Entries are versioned and retained for 30 days.
-          </p>
+          <h1>{t('listTitle')}</h1>
+          <p>{t('listSubtitle')}</p>
         </div>
         <div className="memory-store-header-actions">
           <label className="memory-store-toggle">
@@ -104,7 +103,7 @@ export default function MemoryStoreListView() {
               onChange={e => setIncludeArchived(e.target.checked)}
               data-testid="include-archived-toggle"
             />
-            Show archived
+            {t('listShowArchived')}
           </label>
           <button
             className="btn-primary"
@@ -114,7 +113,7 @@ export default function MemoryStoreListView() {
             }}
             data-testid="new-store-btn"
           >
-            New memory store
+            {t('listNewStore')}
           </button>
         </div>
       </div>
@@ -134,7 +133,7 @@ export default function MemoryStoreListView() {
       {stores.length === 0 ? (
         <div className="memory-store-empty" data-testid="store-empty">
           <p className="empty-text">
-            No memory stores yet. Create one to give agents persistent memory.
+            {t('listEmpty')}
           </p>
         </div>
       ) : (
@@ -142,10 +141,10 @@ export default function MemoryStoreListView() {
           <table className="memory-store-table" data-testid="store-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Description</th>
-                <th>Created</th>
-                <th>Updated</th>
+                <th>{t('common:name')}</th>
+                <th>{t('common:description')}</th>
+                <th>{t('common:created')}</th>
+                <th>{t('common:updated')}</th>
               </tr>
             </thead>
             <tbody>
@@ -160,14 +159,14 @@ export default function MemoryStoreListView() {
                   <td className="memory-store-name-cell">
                     {store.name}
                     {store.archived_at && (
-                      <span className="archived-badge">Archived</span>
+                      <span className="archived-badge">{t('listArchivedBadge')}</span>
                     )}
                   </td>
                   <td className="memory-store-desc-cell">
                     {store.description || '—'}
                   </td>
-                  <td>{new Date(store.created_at).toLocaleString()}</td>
-                  <td>{new Date(store.updated_at).toLocaleString()}</td>
+                  <td>{new Date(store.created_at).toLocaleString(i18n.language)}</td>
+                  <td>{new Date(store.updated_at).toLocaleString(i18n.language)}</td>
                 </tr>
               ))}
             </tbody>
@@ -178,9 +177,9 @@ export default function MemoryStoreListView() {
       {showCreate && (
         <div className="memory-store-dialog-overlay">
           <div className="memory-store-dialog" data-testid="store-create-dialog">
-            <h2>New memory store</h2>
+            <h2>{t('listNewStore')}</h2>
             <div className="form-field">
-              <label htmlFor="store-create-name">Name</label>
+              <label htmlFor="store-create-name">{t('common:name')}</label>
               <input
                 id="store-create-name"
                 value={name}
@@ -191,13 +190,13 @@ export default function MemoryStoreListView() {
               />
             </div>
             <div className="form-field">
-              <label htmlFor="store-create-desc">Description (optional)</label>
+              <label htmlFor="store-create-desc">{t('listDescriptionOptional')}</label>
               <textarea
                 id="store-create-desc"
                 value={description}
                 onChange={e => setDescription(e.target.value)}
                 rows={3}
-                placeholder="What this store is for…"
+                placeholder={t('listDescPlaceholder')}
                 data-testid="store-create-desc"
               />
             </div>
@@ -214,7 +213,7 @@ export default function MemoryStoreListView() {
                 }}
                 data-testid="store-create-cancel"
               >
-                Cancel
+                {t('common:cancel')}
               </button>
               <button
                 className="btn-primary"
@@ -222,7 +221,7 @@ export default function MemoryStoreListView() {
                 onClick={handleCreate}
                 data-testid="store-create-submit"
               >
-                {creating ? 'Creating…' : 'Create store'}
+                {creating ? t('common:creating') : t('listCreateSubmit')}
               </button>
             </div>
           </div>

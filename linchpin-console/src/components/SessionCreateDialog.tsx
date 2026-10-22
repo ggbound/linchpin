@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type {
   Agent,
@@ -38,6 +39,7 @@ const emptyResourceRow = (): ResourceRow => ({
 });
 
 export default function SessionCreateDialog({ open, onClose, onCreated }: SessionCreateDialogProps) {
+  const { t } = useTranslation('sessionCreate');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [vaults, setVaults] = useState<Vault[]>([]);
@@ -79,7 +81,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
         setUploadedFiles(fileRes.data.filter(f => f.source === 'upload' && !f.archived_at));
       } catch (err) {
         const apiErr = err as ApiError;
-        setError(apiErr.message || 'Failed to load agents or environments');
+        setError(apiErr.message || t('loadFailed'));
       }
     };
     load();
@@ -114,16 +116,16 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
     const rowErrors: Record<number, string> = {};
     resourceRows.forEach((row, i) => {
       if (row.kind === 'file') {
-        if (!row.fileId) rowErrors[i] = 'Select a file to mount.';
+        if (!row.fileId) rowErrors[i] = t('selectFileToMount');
       } else if (!row.gitUrl.trim()) {
-        rowErrors[i] = 'Repository URL is required.';
+        rowErrors[i] = t('repoUrlRequired');
       } else if (!row.mountPath.trim()) {
-        rowErrors[i] = 'Mount path is required.';
+        rowErrors[i] = t('mountPathRequired');
       }
     });
     if (Object.keys(rowErrors).length > 0) {
       setResourceErrors(rowErrors);
-      setError('Some resource mounts are incomplete — fix the highlighted rows.');
+      setError(t('mountsIncomplete'));
       return;
     }
     setResourceErrors({});
@@ -134,7 +136,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
     if (ttlTrimmed) {
       const ttlNum = Number(ttlTrimmed);
       if (!Number.isFinite(ttlNum) || ttlNum < 1) {
-        setError('TTL must be a positive number of seconds (at least 1).');
+        setError(t('ttlInvalid'));
         return;
       }
     }
@@ -178,7 +180,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
       onCreated(session.id);
     } catch (err) {
       const apiErr = err as ApiError;
-      setError(apiErr.message || 'Failed to create session');
+      setError(apiErr.message || t('createFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -193,11 +195,11 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
         aria-labelledby="session-create-title"
         onClick={e => e.stopPropagation()}
       >
-        <h2 id="session-create-title" className="dialog-title">New Session</h2>
+        <h2 id="session-create-title" className="dialog-title">{t('newSession')}</h2>
 
         <form onSubmit={handleSubmit} className="dialog-form">
           <div className="form-field">
-            <label htmlFor="session-agent">Agent</label>
+            <label htmlFor="session-agent">{t('agent')}</label>
             <select
               id="session-agent"
               value={agentId}
@@ -205,7 +207,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
               required
               data-testid="session-agent-select"
             >
-              <option value="">Select an agent</option>
+              <option value="">{t('selectAgent')}</option>
               {agents.map(a => (
                 <option key={a.id} value={a.id}>
                   {a.name} ({a.id.slice(0, 8)})
@@ -215,7 +217,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
           </div>
 
           <div className="form-field">
-            <label htmlFor="session-environment">Environment</label>
+            <label htmlFor="session-environment">{t('environment')}</label>
             <select
               id="session-environment"
               value={environmentId}
@@ -223,7 +225,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
               required
               data-testid="session-environment-select"
             >
-              <option value="">Select an environment</option>
+              <option value="">{t('selectEnvironment')}</option>
               {environments.map(env => (
                 <option key={env.id} value={env.id}>
                   {env.name} ({env.id.slice(0, 8)})
@@ -233,19 +235,19 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
           </div>
 
           <div className="form-field">
-            <label htmlFor="session-title">Title (optional)</label>
+            <label htmlFor="session-title">{t('titleOptional')}</label>
             <input
               id="session-title"
               type="text"
               value={title}
               onChange={e => setTitle(e.target.value)}
-              placeholder="Session title"
+              placeholder={t('sessionTitlePlaceholder')}
               data-testid="session-title-input"
             />
           </div>
 
           <div className="form-field">
-            <label htmlFor="session-ttl">TTL in seconds (optional)</label>
+            <label htmlFor="session-ttl">{t('ttlOptional')}</label>
             <input
               id="session-ttl"
               type="number"
@@ -253,19 +255,19 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
               step="1"
               value={ttl}
               onChange={e => setTtl(e.target.value)}
-              placeholder="e.g. 3600"
+              placeholder={t('ttlPlaceholder')}
               data-testid="session-ttl-input"
             />
             <p className="dialog-hint">
-              Idle sessions are reaped after this many seconds. Must be at least 1.
+              {t('ttlHint')}
             </p>
           </div>
 
           <div className="form-field">
-            <label>Credential Vaults (optional)</label>
+            <label>{t('vaultsOptional')}</label>
             <div className="vault-checkbox-list" data-testid="session-vault-select">
               {vaults.length === 0 ? (
-                <span className="vault-checkbox-empty">No vaults available</span>
+                <span className="vault-checkbox-empty">{t('noVaults')}</span>
               ) : (
                 vaults.map(v => (
                   <label key={v.id} className="vault-checkbox-item">
@@ -290,7 +292,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
           </div>
 
           <div className="form-field">
-            <label>Resource Mounts (optional)</label>
+            <label>{t('mountsOptional')}</label>
             {resourceRows.map((row, i) => (
               <Fragment key={i}>
                 <div
@@ -303,8 +305,8 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
                     onChange={e => updateResourceRow(i, { kind: e.target.value as ResourceRow['kind'] })}
                     data-testid="resource-kind-select"
                   >
-                    <option value="file">File (uploaded)</option>
-                    <option value="git_repository">Git repository</option>
+                    <option value="file">{t('fileUploaded')}</option>
+                    <option value="git_repository">{t('gitRepository')}</option>
                   </select>
                   {row.kind === 'file' ? (
                     <>
@@ -313,7 +315,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
                         onChange={e => updateResourceRow(i, { fileId: e.target.value })}
                         data-testid="resource-file-select"
                       >
-                        <option value="">Select uploaded file</option>
+                        <option value="">{t('selectUploadedFile')}</option>
                         {uploadedFiles.map(f => (
                           <option key={f.id} value={f.id}>
                             {f.filename} ({f.id.slice(0, 8)})
@@ -322,7 +324,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
                       </select>
                       <input
                         type="text"
-                        placeholder="Mount path (optional)"
+                        placeholder={t('mountPathOptional')}
                         value={row.mountPath}
                         onChange={e => updateResourceRow(i, { mountPath: e.target.value })}
                         data-testid="resource-mount-path"
@@ -339,21 +341,21 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
                       />
                       <input
                         type="text"
-                        placeholder="/src/repo (required)"
+                        placeholder={t('gitMountPlaceholder')}
                         value={row.mountPath}
                         onChange={e => updateResourceRow(i, { mountPath: e.target.value })}
                         data-testid="resource-git-mount"
                       />
                       <input
                         type="text"
-                        placeholder="Branch (optional)"
+                        placeholder={t('branchOptional')}
                         value={row.gitBranch}
                         onChange={e => updateResourceRow(i, { gitBranch: e.target.value })}
                         data-testid="resource-git-branch"
                       />
                       <input
                         type="password"
-                        placeholder="Token (optional)"
+                        placeholder={t('tokenOptional')}
                         value={row.gitToken}
                         onChange={e => updateResourceRow(i, { gitToken: e.target.value })}
                         data-testid="resource-git-token"
@@ -365,7 +367,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
                           onChange={e => updateResourceRow(i, { gitShallow: e.target.checked })}
                           data-testid="resource-git-shallow"
                         />
-                        Shallow clone
+                        {t('shallowClone')}
                       </label>
                     </>
                   )}
@@ -373,7 +375,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
                     type="button"
                     className="resource-remove"
                     onClick={() => removeResourceRow(i)}
-                    aria-label="Remove resource"
+                    aria-label={t('removeResource')}
                     data-testid="resource-remove"
                   >
                     ✕
@@ -392,7 +394,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
               onClick={addResourceRow}
               data-testid="resource-add"
             >
-              + Add resource
+              {t('addResource')}
             </button>
           </div>
 
@@ -409,7 +411,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
               onClick={onClose}
               data-testid="session-create-cancel"
             >
-              Cancel
+              {t('common:cancel')}
             </button>
             <button
               type="submit"
@@ -417,7 +419,7 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
               disabled={submitting || !agentId || !environmentId}
               data-testid="session-create-submit"
             >
-              {submitting ? 'Creating…' : 'Create session'}
+              {submitting ? t('common:creating') : t('createSession')}
             </button>
           </div>
         </form>

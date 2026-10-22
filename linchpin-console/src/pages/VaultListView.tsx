@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { Vault, PaginatedResponse } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -8,25 +9,26 @@ import Pagination from '../components/Pagination';
 import ConfirmDialog from '../components/ConfirmDialog';
 import './VaultListView.css';
 
-function formatRelativeTime(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diffMs = now - then;
-  const diffSec = Math.floor(diffMs / 1000);
-
-  if (diffSec < 60) return 'just now';
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin} minute${diffMin === 1 ? '' : 's'} ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr} hour${diffHr === 1 ? '' : 's'} ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 30) return `${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
-
-  return new Date(dateStr).toLocaleDateString();
-}
-
 export default function VaultListView() {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation('vaults');
+
+  const formatRelativeTime = (dateStr: string): string => {
+    const now = Date.now();
+    const then = new Date(dateStr).getTime();
+    const diffMs = now - then;
+    const diffSec = Math.floor(diffMs / 1000);
+
+    if (diffSec < 60) return t('time:justNow');
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return t('time:minutesAgo', { count: diffMin });
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return t('time:hoursAgo', { count: diffHr });
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 30) return t('time:daysAgo', { count: diffDay });
+
+    return new Date(dateStr).toLocaleDateString(i18n.language);
+  };
 
   const [vaults, setVaults] = useState<Vault[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,7 +93,7 @@ export default function VaultListView() {
       setLoading(false);
     } catch (err) {
       const apiErr = err as ApiError;
-      setCreateError(apiErr.message || 'Failed to create vault');
+      setCreateError(apiErr.message || t('listCreateFailed'));
     } finally {
       setCreating(false);
     }
@@ -105,7 +107,7 @@ export default function VaultListView() {
       setVaults(prev => prev.filter(v => v.id !== deleteTarget.id));
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to delete vault');
+      setActionError(apiErr.message || t('listDeleteFailed'));
     } finally {
       setDeleteTarget(null);
     }
@@ -123,7 +125,7 @@ export default function VaultListView() {
       );
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to archive vault');
+      setActionError(apiErr.message || t('listArchiveFailed'));
     } finally {
       setArchiveTarget(null);
     }
@@ -149,28 +151,28 @@ export default function VaultListView() {
     <div className="vault-list-view" data-testid="vault-list-view">
       <div className="vault-list-header">
         <div>
-          <h1>Credential Vaults</h1>
-          <p>Manage encrypted credential vaults for sessions.</p>
+          <h1>{t('listTitle')}</h1>
+          <p>{t('listSubtitle')}</p>
         </div>
         <button
           className="btn-primary"
           data-testid="new-vault-btn"
           onClick={() => setShowCreate(s => !s)}
         >
-          {showCreate ? 'Cancel' : 'New vault'}
+          {showCreate ? t('common:cancel') : t('listNewVault')}
         </button>
       </div>
 
       {showCreate && (
         <form className="inline-create-form" onSubmit={handleCreate} data-testid="vault-create-form">
           <div className="form-field">
-            <label htmlFor="vault-name">Display Name</label>
+            <label htmlFor="vault-name">{t('listDisplayNameLabel')}</label>
             <input
               id="vault-name"
               type="text"
               value={newName}
               onChange={e => setNewName(e.target.value)}
-              placeholder="e.g. Production Keys"
+              placeholder={t('listNamePlaceholder')}
               required
               data-testid="vault-name-input"
             />
@@ -181,7 +183,7 @@ export default function VaultListView() {
             disabled={creating || !newName.trim()}
             data-testid="vault-create-submit"
           >
-            {creating ? 'Creating…' : 'Create'}
+            {creating ? t('common:creating') : t('common:create')}
           </button>
         </form>
       )}
@@ -192,16 +194,16 @@ export default function VaultListView() {
         <table className="vault-list-table" data-testid="vault-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Created</th>
-              <th>Status</th>
-              <th>Actions</th>
+              <th>{t('common:name')}</th>
+              <th>{t('common:created')}</th>
+              <th>{t('listStatus')}</th>
+              <th>{t('common:actions')}</th>
             </tr>
           </thead>
           <tbody>
             {vaults.length === 0 ? (
               <tr>
-                <td colSpan={4} className="empty-row">No vaults yet.</td>
+                <td colSpan={4} className="empty-row">{t('listEmpty')}</td>
               </tr>
             ) : (
               vaults.map(vault => (
@@ -220,9 +222,9 @@ export default function VaultListView() {
                   <td data-testid="vault-cell-created">{formatRelativeTime(vault.created_at)}</td>
                   <td data-testid="vault-cell-status">
                     {vault.archived_at ? (
-                      <span className="archived-badge">Archived</span>
+                      <span className="archived-badge">{t('status:archived')}</span>
                     ) : (
-                      'Active'
+                      t('status:active')
                     )}
                   </td>
                   <td>
@@ -237,7 +239,7 @@ export default function VaultListView() {
                           onClick={() => setArchiveTarget(vault)}
                           data-testid="vault-archive-btn"
                         >
-                          Archive
+                          {t('listArchive')}
                         </button>
                       )}
                       <button
@@ -245,7 +247,7 @@ export default function VaultListView() {
                         onClick={() => setDeleteTarget(vault)}
                         data-testid="vault-delete-btn"
                       >
-                        Delete
+                        {t('common:delete')}
                       </button>
                     </div>
                   </td>
@@ -260,16 +262,16 @@ export default function VaultListView() {
 
       <ConfirmDialog
         open={!!deleteTarget}
-        title="Delete Vault"
-        message={`Are you sure you want to permanently delete "${deleteTarget?.display_name}"? This will also delete all its credentials.`}
+        title={t('listDeleteVaultTitle')}
+        message={t('listDeleteVaultMessage', { name: deleteTarget?.display_name ?? '' })}
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
       />
 
       <ConfirmDialog
         open={!!archiveTarget}
-        title="Archive Vault"
-        message={`Are you sure you want to archive "${archiveTarget?.display_name}"? Encrypted secrets will be purged.`}
+        title={t('listArchiveVaultTitle')}
+        message={t('listArchiveVaultMessage', { name: archiveTarget?.display_name ?? '' })}
         onConfirm={handleArchive}
         onCancel={() => setArchiveTarget(null)}
       />

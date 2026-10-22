@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { apiClient, ApiError } from '../api/client';
 import { resourceHref } from '../lib/resourceLinks';
@@ -50,6 +51,7 @@ function detailFull(detail: Record<string, unknown>): string {
 }
 
 export default function AuditView() {
+  const { t, i18n } = useTranslation('audit');
   const [draft, setDraft] = useState<AuditFilters>(EMPTY_FILTERS);
   const [applied, setApplied] = useState<AuditFilters>(EMPTY_FILTERS);
   const [entries, setEntries] = useState<AuditEntry[]>([]);
@@ -101,7 +103,7 @@ export default function AuditView() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setDownloadError((err as ApiError).message || 'Failed to download audit log');
+      setDownloadError((err as ApiError).message || t('downloadFailed'));
     }
   };
 
@@ -112,17 +114,15 @@ export default function AuditView() {
   return (
     <div className="audit-view" data-testid="audit-view">
       <div className="audit-header">
-        <h1>Audit Log</h1>
+        <h1>{t('title')}</h1>
         <p>
-          Append-only record of every mutation performed through the API in
-          your project, newest first. Filter by time range, resource type or
-          action; export the current view as newline-delimited JSON.
+          {t('subtitle')}
         </p>
       </div>
 
       <div className="audit-filters" data-testid="audit-filters">
         <div className="audit-filter-field">
-          <label htmlFor="audit-from">From</label>
+          <label htmlFor="audit-from">{t('from')}</label>
           <input
             id="audit-from"
             type="datetime-local"
@@ -132,7 +132,7 @@ export default function AuditView() {
           />
         </div>
         <div className="audit-filter-field">
-          <label htmlFor="audit-to">To</label>
+          <label htmlFor="audit-to">{t('to')}</label>
           <input
             id="audit-to"
             type="datetime-local"
@@ -142,27 +142,27 @@ export default function AuditView() {
           />
         </div>
         <div className="audit-filter-field">
-          <label htmlFor="audit-resource-type">Resource type</label>
+          <label htmlFor="audit-resource-type">{t('resourceType')}</label>
           <input
             id="audit-resource-type"
             value={draft.resource_type}
             onChange={e => updateDraft({ resource_type: e.target.value })}
-            placeholder="e.g. environment"
+            placeholder={t('resourceTypePlaceholder')}
             data-testid="audit-resource-type"
           />
         </div>
         <div className="audit-filter-field">
-          <label htmlFor="audit-action">Action</label>
+          <label htmlFor="audit-action">{t('action')}</label>
           <input
             id="audit-action"
             value={draft.action}
             onChange={e => updateDraft({ action: e.target.value })}
-            placeholder="e.g. create"
+            placeholder={t('actionPlaceholder')}
             data-testid="audit-action"
           />
         </div>
         <div className="audit-filter-field audit-filter-limit">
-          <label htmlFor="audit-limit">Limit</label>
+          <label htmlFor="audit-limit">{t('limit')}</label>
           <input
             id="audit-limit"
             type="number"
@@ -175,13 +175,13 @@ export default function AuditView() {
         </div>
         <div className="audit-filter-actions">
           <button className="btn-primary" onClick={handleApply} data-testid="audit-apply">
-            Apply
+            {t('apply')}
           </button>
           <button onClick={handleReset} data-testid="audit-reset">
-            Reset
+            {t('reset')}
           </button>
           <button onClick={handleDownload} data-testid="audit-download">
-            Download NDJSON
+            {t('downloadNdjson')}
           </button>
         </div>
       </div>
@@ -202,22 +202,22 @@ export default function AuditView() {
         />
       ) : entries.length === 0 ? (
         <p className="empty-text" data-testid="audit-empty">
-          No audit entries match the current filters.
+          {t('empty')}
         </p>
       ) : (
         <div className="audit-table-wrapper">
           <div className="audit-meta-line" data-testid="audit-count">
-            {entries.length} {entries.length === 1 ? 'entry' : 'entries'} (newest first)
+            {t('entryCount', { count: entries.length })}
           </div>
           <table className="audit-table" data-testid="audit-table">
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Action</th>
-                <th>Resource type</th>
-                <th>Resource ID</th>
-                <th>Actor</th>
-                <th>Detail</th>
+                <th>{t('colTime')}</th>
+                <th>{t('colAction')}</th>
+                <th>{t('colResourceType')}</th>
+                <th>{t('colResourceId')}</th>
+                <th>{t('colActor')}</th>
+                <th>{t('colDetail')}</th>
               </tr>
             </thead>
             <tbody>
@@ -229,7 +229,7 @@ export default function AuditView() {
                       className="audit-time-cell"
                       title={entry.at}
                     >
-                      {new Date(entry.at).toLocaleString()}
+                      {new Date(entry.at).toLocaleString(i18n.language)}
                     </td>
                     <td>
                       <code>{entry.action}</code>

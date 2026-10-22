@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiClient } from '../api/client';
 import type { Agent, Environment, SubagentConfig } from '../types';
 import './SubagentEditor.css';
@@ -19,6 +20,7 @@ interface SubagentEditorProps {
  * optional dedicated environment + description.
  */
 export default function SubagentEditor({ value, onChange, selfAgentId }: SubagentEditorProps) {
+  const { t } = useTranslation('subagentEditor');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
 
@@ -84,7 +86,7 @@ export default function SubagentEditor({ value, onChange, selfAgentId }: Subagen
           <div key={idx} className="subagent-row" data-testid="subagent-row">
             <div className="subagent-fields">
               <div className="form-field">
-                <label>Name</label>
+                <label>{t('common:name')}</label>
                 <input
                   type="text"
                   value={sub.name}
@@ -94,23 +96,23 @@ export default function SubagentEditor({ value, onChange, selfAgentId }: Subagen
                 />
                 {nameInvalid && (
                   <span className="subagent-hint subagent-hint--error">
-                    lowercase letters, digits, _ or - (max 64 chars, starts with a letter)
+                    {t('nameRuleHint')}
                   </span>
                 )}
                 {nameTaken && (
                   <span className="subagent-hint subagent-hint--error">
-                    name must be unique
+                    {t('nameUnique')}
                   </span>
                 )}
               </div>
               <div className="form-field">
-                <label>Agent</label>
+                <label>{t('agent')}</label>
                 <select
                   value={sub.agent_id}
                   onChange={(e) => update(idx, 'agent_id', e.target.value)}
                   data-testid="subagent-agent"
                 >
-                  <option value="">Select agent…</option>
+                  <option value="">{t('selectAgent')}</option>
                   {agents
                     .filter((a) => a.id !== selfAgentId && !a.archived_at)
                     .map((a) => (
@@ -120,17 +122,17 @@ export default function SubagentEditor({ value, onChange, selfAgentId }: Subagen
                     ))}
                 </select>
                 {selected && (
-                  <span className="subagent-hint">model: {selected.model.id}</span>
+                  <span className="subagent-hint">{t('model', { model: selected.model.id })}</span>
                 )}
               </div>
               <div className="form-field">
-                <label>Environment (optional)</label>
+                <label>{t('environmentOptional')}</label>
                 <select
                   value={sub.environment_id ?? ''}
                   onChange={(e) => update(idx, 'environment_id', e.target.value)}
                   data-testid="subagent-environment"
                 >
-                  <option value="">Inherit session environment</option>
+                  <option value="">{t('inheritSessionEnvironment')}</option>
                   {environments
                     .filter((env) => !env.archived_at)
                     .map((env) => (
@@ -141,12 +143,12 @@ export default function SubagentEditor({ value, onChange, selfAgentId }: Subagen
                 </select>
               </div>
               <div className="form-field subagent-desc">
-                <label>Description</label>
+                <label>{t('common:description')}</label>
                 <input
                   type="text"
                   value={sub.description ?? ''}
                   onChange={(e) => update(idx, 'description', e.target.value)}
-                  placeholder="When to spawn this subagent"
+                  placeholder={t('descriptionPlaceholder')}
                   data-testid="subagent-description"
                 />
               </div>
@@ -157,7 +159,7 @@ export default function SubagentEditor({ value, onChange, selfAgentId }: Subagen
               onClick={() => removeRow(idx)}
               data-testid="subagent-remove"
             >
-              Remove
+              {t('remove')}
             </button>
           </div>
         );
@@ -169,10 +171,10 @@ export default function SubagentEditor({ value, onChange, selfAgentId }: Subagen
         disabled={atCapacity}
         data-testid="subagent-add"
       >
-        + Add Subagent
+        {t('addSubagent')}
       </button>
       {atCapacity && (
-        <span className="subagent-hint">max {MAX_SUBAGENTS} subagents</span>
+        <span className="subagent-hint">{t('maxSubagents', { count: MAX_SUBAGENTS })}</span>
       )}
     </div>
   );

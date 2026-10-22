@@ -1,0 +1,14 @@
+{
+  "connecting": "Connecting…",
+  "live": "Live",
+  "reconnecting": "Reconnecting…",
+  "closed": "Offline",
+  "unknownTool": "Unknown tool",
+  "anErrorOccurred": "An error occurred",
+  "noEvents": "No events yet.",
+  "toolUse": "Tool use",
+  "toolResult": "Tool result",
+  "mcpToolUse": "MCP tool use",
+  "mcpToolResult": "MCP tool result",
+  "customToolUse": "Custom tool use"
+}

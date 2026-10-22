@@ -1,0 +1,23 @@
+{
+  "title": "审计日志",
+  "subtitle": "记录通过 API 对本项目执行的每一次变更，仅追加、不可篡改，按最新在前排列。可按时间范围、资源类型或操作筛选，并可将当前视图导出为换行分隔的 JSON（NDJSON）。",
+  "from": "开始时间",
+  "to": "结束时间",
+  "resourceType": "资源类型",
+  "resourceTypePlaceholder": "例如：environment",
+  "action": "操作",
+  "actionPlaceholder": "例如：create",
+  "limit": "数量上限",
+  "apply": "应用",
+  "reset": "重置",
+  "downloadNdjson": "下载 NDJSON",
+  "downloadFailed": "下载审计日志失败",
+  "empty": "没有符合当前筛选条件的审计条目。",
+  "entryCount_other": "共 {{count}} 条审计条目（最新在前）",
+  "colTime": "时间",
+  "colAction": "操作",
+  "colResourceType": "资源类型",
+  "colResourceId": "资源 ID",
+  "colActor": "操作者",
+  "colDetail": "详情"
+}

@@ -1,0 +1,8 @@
+{
+  "pendingToolCall": "Pending tool call: ",
+  "sending": "Sending…",
+  "approve": "Approve",
+  "reject": "Reject",
+  "resolved": "Resolved",
+  "sendFailed": "Failed to send confirmation"
+}

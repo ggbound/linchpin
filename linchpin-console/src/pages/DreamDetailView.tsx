@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import { apiClient, ApiError } from '../api/client';
 import type { Dream, Agent, MemoryStore, PaginatedResponse } from '../types';
@@ -9,6 +10,7 @@ import './DreamDetailView.css';
 
 export default function DreamDetailView() {
   const { id } = useParams<{ id: string }>();
+  const { t, i18n } = useTranslation('dreams');
 
   const [dream, setDream] = useState<Dream | null>(null);
   const [storeNames, setStoreNames] = useState<Record<string, string>>({});
@@ -71,7 +73,7 @@ export default function DreamDetailView() {
       setShowCancelConfirm(false);
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to cancel dream');
+      setActionError(apiErr.message || t('detailCancelFailed'));
       setShowCancelConfirm(false);
     } finally {
       setCanceling(false);
@@ -111,28 +113,28 @@ export default function DreamDetailView() {
   return (
     <div className="dream-detail-view" data-testid="dream-detail-view">
       <Link to="/dreams" className="back-link" data-testid="back-link">
-        ← Dreams
+        ← {t('detailBack')}
       </Link>
 
       <div className="dream-detail-header">
         <div className="dream-detail-title-row">
           <h1 data-testid="dream-title">{dream.output_store_name}</h1>
           <span className={`dream-status dream-status--${dream.status}`} data-testid="dream-status">
-            {dream.status}
+            {t(`status:${dream.status}`, { defaultValue: String(dream.status) })}
           </span>
         </div>
         <div className="dream-detail-meta">
-          <span>Created {new Date(dream.created_at).toLocaleString()}</span>
+          <span>{t('detailCreatedAt', { time: new Date(dream.created_at).toLocaleString(i18n.language) })}</span>
           {dream.started_at && (
             <>
               <span className="meta-separator">·</span>
-              <span>Started {new Date(dream.started_at).toLocaleString()}</span>
+              <span>{t('detailStartedAt', { time: new Date(dream.started_at).toLocaleString(i18n.language) })}</span>
             </>
           )}
           {dream.ended_at && (
             <>
               <span className="meta-separator">·</span>
-              <span>Ended {new Date(dream.ended_at).toLocaleString()}</span>
+              <span>{t('detailEndedAt', { time: new Date(dream.ended_at).toLocaleString(i18n.language) })}</span>
             </>
           )}
         </div>
@@ -152,32 +154,32 @@ export default function DreamDetailView() {
             onClick={() => setShowCancelConfirm(true)}
             data-testid="dream-cancel-btn"
           >
-            {canceling ? 'Canceling…' : 'Cancel dream'}
+            {canceling ? t('detailCanceling') : t('detailCancelDream')}
           </button>
         </section>
       )}
 
       {dream.error && (
         <section className="detail-section" data-testid="dream-error-section">
-          <h2>Error</h2>
+          <h2>{t('common:error')}</h2>
           <p className="dream-error-text" data-testid="dream-error-text">{dream.error}</p>
         </section>
       )}
 
       <section className="detail-section" data-testid="dream-info-section">
         <h2>
-          Configuration
+          {t('detailConfiguration')}
           <button
             className="btn-refresh"
             onClick={handleRefresh}
             disabled={loading}
             data-testid="dream-refresh-btn"
           >
-            Refresh
+            {t('common:refresh')}
           </button>
         </h2>
         <dl className="detail-grid">
-          <dt>Input Store</dt>
+          <dt>{t('detailInputStore')}</dt>
           <dd>
             <Link
               to={`/memory-stores/${dream.input_memory_store_id}`}
@@ -186,9 +188,9 @@ export default function DreamDetailView() {
               {storeNames[dream.input_memory_store_id] || dream.input_memory_store_id}
             </Link>
           </dd>
-          <dt>Output Store Name</dt>
+          <dt>{t('detailOutputStoreName')}</dt>
           <dd><code>{dream.output_store_name}</code></dd>
-          <dt>Output Store</dt>
+          <dt>{t('detailOutputStore')}</dt>
           <dd data-testid="dream-output-store">
             {dream.output_memory_store_id ? (
               <Link
@@ -201,19 +203,19 @@ export default function DreamDetailView() {
               '—'
             )}
           </dd>
-          <dt>Dreamer Agent</dt>
+          <dt>{t('detailDreamerAgent')}</dt>
           <dd data-testid="dream-dreamer-agent">
             {dream.dreamer_agent_id ? (
               <Link to={`/agents/${dream.dreamer_agent_id}`} data-testid="dream-agent-link">
                 {agentNames[dream.dreamer_agent_id] || dream.dreamer_agent_id}
               </Link>
             ) : (
-              'Platform default'
+              t('detailPlatformDefault')
             )}
           </dd>
           {dream.dreamer_session_id && (
             <>
-              <dt>Dreamer Session</dt>
+              <dt>{t('detailDreamerSession')}</dt>
               <dd>
                 <Link to={`/sessions/${dream.dreamer_session_id}`} data-testid="dream-session-link">
                   {dream.dreamer_session_id.slice(0, 8)}
@@ -225,41 +227,41 @@ export default function DreamDetailView() {
       </section>
 
       <section className="detail-section" data-testid="dream-filter-section">
-        <h2>Session Filter</h2>
+        <h2>{t('detailSessionFilter')}</h2>
         {hasFilter ? (
           <dl className="detail-grid">
-            <dt>Agent</dt>
+            <dt>{t('detailFilterAgent')}</dt>
             <dd data-testid="dream-filter-agent">
               {sf.agent_id ? (
                 <Link to={`/agents/${sf.agent_id}`}>
                   {agentNames[sf.agent_id] || sf.agent_id}
                 </Link>
               ) : (
-                'Any'
+                t('detailAny')
               )}
             </dd>
-            <dt>Since</dt>
+            <dt>{t('detailSince')}</dt>
             <dd data-testid="dream-filter-since">
-              {sf.since ? new Date(sf.since).toLocaleString() : 'Any'}
+              {sf.since ? new Date(sf.since).toLocaleString(i18n.language) : t('detailAny')}
             </dd>
-            <dt>Until</dt>
+            <dt>{t('detailUntil')}</dt>
             <dd data-testid="dream-filter-until">
-              {sf.until ? new Date(sf.until).toLocaleString() : 'Any'}
+              {sf.until ? new Date(sf.until).toLocaleString(i18n.language) : t('detailAny')}
             </dd>
-            <dt>Session Limit</dt>
+            <dt>{t('detailSessionLimit')}</dt>
             <dd data-testid="dream-filter-limit">{sf.limit}</dd>
           </dl>
         ) : (
           <p className="empty-text" data-testid="dream-filter-empty">
-            No filters — the dreamer curates every past session (capped at {sf.limit}).
+            {t('detailNoFilters', { limit: sf.limit })}
           </p>
         )}
       </section>
 
       <ConfirmDialog
         open={showCancelConfirm}
-        title="Cancel Dream"
-        message="Are you sure you want to cancel this dream? The dreamer session will be terminated and no output store will be produced."
+        title={t('detailCancelTitle')}
+        message={t('detailCancelMessage')}
         onConfirm={handleCancel}
         onCancel={() => setShowCancelConfirm(false)}
       />

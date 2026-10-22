@@ -1,0 +1,12 @@
+{
+  "title": "Artifacts",
+  "subtitle": "Files exported by agents from session sandboxes via the save_artifact tool. Click a session to see the run that produced it.",
+  "moreNote": "Showing the first 100 artifacts.",
+  "empty": "No artifacts yet. Agents export artifacts from sessions with the save_artifact tool.",
+  "downloading": "Downloading…",
+  "downloadFailed": "Failed to download artifact",
+  "colFilename": "Filename",
+  "colContentType": "Content Type",
+  "colSize": "Size",
+  "colSession": "Session"
+}

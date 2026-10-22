@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
 import { apiClient, ApiError } from '../api/client';
 import type { Agent, Session, PaginatedResponse } from '../types';
@@ -9,29 +10,13 @@ import StatusBadge from '../components/StatusBadge';
 import SessionCreateDialog from '../components/SessionCreateDialog';
 import './SessionListView.css';
 
-function formatRelativeTime(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diffMs = now - then;
-  const diffSec = Math.floor(diffMs / 1000);
-
-  if (diffSec < 60) return 'just now';
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin} minute${diffMin === 1 ? '' : 's'} ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr} hour${diffHr === 1 ? '' : 's'} ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 30) return `${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
-
-  return new Date(dateStr).toLocaleDateString();
-}
-
 // Search only filters already-loaded rows; a full session ID pasted from
 // elsewhere won't match anything. Offer a direct jump for that case.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default function SessionListView() {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation('sessions');
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -103,6 +88,25 @@ export default function SessionListView() {
 
   const agentNames = new Map(agents.map(a => [a.id, a.name]));
 
+  const formatRelativeTime = (dateStr: string): string => {
+    const now = Date.now();
+    const then = new Date(dateStr).getTime();
+    const diffMs = now - then;
+    const diffSec = Math.floor(diffMs / 1000);
+
+    if (diffSec < 10) return t('time:justNow');
+    if (diffSec < 60) return t('time:secondsAgo', { count: diffSec });
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return t('time:minutesAgo', { count: diffMin });
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return t('time:hoursAgo', { count: diffHr });
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 7) return t('time:daysAgo', { count: diffDay });
+    if (diffDay < 30) return t('time:weeksAgo', { count: Math.floor(diffDay / 7) });
+
+    return new Date(dateStr).toLocaleDateString(i18n.language);
+  };
+
   if (loading) return <LoadingSpinner />;
 
   if (error) {
@@ -123,15 +127,15 @@ export default function SessionListView() {
     <div className="session-list-view" data-testid="session-list-view">
       <div className="session-list-header">
         <div>
-          <h1>Sessions</h1>
-          <p>Create and manage agent sessions.</p>
+          <h1>{t('listTitle')}</h1>
+          <p>{t('listSubtitle')}</p>
         </div>
         <button
           className="btn-primary"
           data-testid="new-session-btn"
           onClick={() => setShowCreateDialog(true)}
         >
-          New session
+          {t('listNewSession')}
         </button>
       </div>
 
@@ -139,11 +143,11 @@ export default function SessionListView() {
         <input
           type="text"
           className="search-input"
-          placeholder="Go to session ID"
+          placeholder={t('listSearchPlaceholder')}
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           data-testid="session-search-input"
-          aria-label="Search sessions by ID"
+          aria-label={t('listSearchAriaLabel')}
         />
 
         <select
@@ -153,9 +157,9 @@ export default function SessionListView() {
             setAgentFilter(e.target.value);
           }}
           data-testid="agent-filter-select"
-          aria-label="Filter by agent"
+          aria-label={t('listFilterByAgentAriaLabel')}
         >
-          <option value="">All agents</option>
+          <option value="">{t('listAllAgents')}</option>
           {agents.map(a => (
             <option key={a.id} value={a.id}>
               {a.name} ({a.id.slice(0, 8)})
@@ -169,7 +173,7 @@ export default function SessionListView() {
             checked={showArchived}
             onChange={e => setShowArchived(e.target.checked)}
           />
-          Show archived
+          {t('listShowArchived')}
         </label>
       </div>
 
@@ -177,11 +181,11 @@ export default function SessionListView() {
         <table className="session-list-table" data-testid="session-table">
           <thead>
             <tr>
-              <th>ID</th>
-              <th>Title</th>
-              <th>Status</th>
-              <th>Agent</th>
-              <th>Created</th>
+              <th>{t('common:id')}</th>
+              <th>{t('listColumnTitle')}</th>
+              <th>{t('listColumnStatus')}</th>
+              <th>{t('listColumnAgent')}</th>
+              <th>{t('common:created')}</th>
             </tr>
           </thead>
           <tbody>
@@ -190,19 +194,19 @@ export default function SessionListView() {
                 <td colSpan={5} className="empty-row">
                   {searchQuery ? (
                     <>
-                      No sessions match your search.{' '}
+                      {t('listNoSearchResults')}{' '}
                       {UUID_RE.test(searchQuery.trim()) && (
                         <button
                           className="session-jump-btn"
                           data-testid="session-jump-btn"
                           onClick={() => navigate(`/sessions/${searchQuery.trim()}`)}
                         >
-                          Open “{searchQuery.trim().slice(0, 8)}…”
+                          {t('listOpenShort', { id: searchQuery.trim().slice(0, 8) })}
                         </button>
                       )}
                     </>
                   ) : (
-                    'No sessions yet.'
+                    t('listNoSessions')
                   )}
                 </td>
               </tr>
@@ -223,7 +227,7 @@ export default function SessionListView() {
                     <code>{session.id}</code>
                   </td>
                   <td data-testid="session-cell-title">
-                    {session.title || 'Untitled'}
+                    {session.title || t('listUntitled')}
                   </td>
                   <td data-testid="session-cell-status">
                     <StatusBadge status={session.status} />

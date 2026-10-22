@@ -1,27 +1,29 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { WebhookEventType, WebhookEndpoint } from '../types';
 import './WebhookCreateForm.css';
 
 const WEBHOOK_EVENTS: { value: WebhookEventType; label: string }[] = [
-  { value: 'session.created', label: 'Session created' },
-  { value: 'session.status_idle', label: 'Session status idle' },
-  { value: 'session.status', label: 'Session status (unified transition)' },
-  { value: 'session.status_terminated', label: 'Session status terminated' },
-  { value: 'session.terminated', label: 'Session terminated' },
-  { value: 'session.failed', label: 'Session failed' },
-  { value: 'session.error', label: 'Session error' },
-  { value: 'session.requires_action', label: 'Session requires action' },
-  { value: 'vault.credential.created', label: 'Vault credential created' },
-  { value: 'vault.credential.updated', label: 'Vault credential updated' },
-  { value: 'vault.credential.deleted', label: 'Vault credential deleted' },
+  { value: 'session.created', label: 'createEventSessionCreated' },
+  { value: 'session.status_idle', label: 'createEventSessionStatusIdle' },
+  { value: 'session.status', label: 'createEventSessionStatus' },
+  { value: 'session.status_terminated', label: 'createEventSessionStatusTerminated' },
+  { value: 'session.terminated', label: 'createEventSessionTerminated' },
+  { value: 'session.failed', label: 'createEventSessionFailed' },
+  { value: 'session.error', label: 'createEventSessionError' },
+  { value: 'session.requires_action', label: 'createEventSessionRequiresAction' },
+  { value: 'vault.credential.created', label: 'createEventVaultCredentialCreated' },
+  { value: 'vault.credential.updated', label: 'createEventVaultCredentialUpdated' },
+  { value: 'vault.credential.deleted', label: 'createEventVaultCredentialDeleted' },
 ];
 
 const DEFAULT_EVENTS = new Set(['session.status_idle', 'session.error', 'session.requires_action']);
 
 export default function WebhookCreateForm() {
   const navigate = useNavigate();
+  const { t } = useTranslation('webhooks');
 
   const [url, setUrl] = useState('');
   const [description, setDescription] = useState('');
@@ -45,7 +47,7 @@ export default function WebhookCreateForm() {
     e.preventDefault();
     const trimmedUrl = url.trim();
     if (!trimmedUrl) {
-      setFormError('URL is required.');
+      setFormError(t('createUrlRequired'));
       return;
     }
     setSubmitting(true);
@@ -61,7 +63,7 @@ export default function WebhookCreateForm() {
       navigate(`/webhooks/${created.id}`, { state: { secret: created.secret } });
     } catch (err) {
       const apiErr = err as ApiError;
-      setFormError(apiErr.message || 'Failed to create webhook endpoint');
+      setFormError(apiErr.message || t('createFailed'));
       setSubmitting(false);
     }
   };
@@ -69,18 +71,17 @@ export default function WebhookCreateForm() {
   return (
     <div className="webhook-create-view" data-testid="webhook-create-view">
       <Link to="/webhooks" className="back-link" data-testid="back-link">
-        ← Webhooks
+        ← {t('listTitle')}
       </Link>
 
-      <h1>New Webhook Endpoint</h1>
+      <h1>{t('createTitle')}</h1>
       <p className="webhook-create-intro">
-        Register an HTTP endpoint to receive event notifications. The signing secret
-        is shown once after creation — store it securely.
+        {t('createIntro')}
       </p>
 
       <form onSubmit={handleSubmit} data-testid="webhook-create-form">
         <div className="webhook-form-field">
-          <label htmlFor="webhook-url">URL</label>
+          <label htmlFor="webhook-url">{t('createFieldUrl')}</label>
           <input
             id="webhook-url"
             type="url"
@@ -92,23 +93,24 @@ export default function WebhookCreateForm() {
         </div>
 
         <div className="webhook-form-field">
-          <label htmlFor="webhook-description">Description (optional)</label>
+          <label htmlFor="webhook-description">{t('createFieldDescription')}</label>
           <input
             id="webhook-description"
             type="text"
             value={description}
             onChange={e => setDescription(e.target.value)}
-            placeholder="What is this endpoint for?"
+            placeholder={t('createDescriptionPlaceholder')}
             data-testid="webhook-desc-input"
           />
         </div>
 
         <fieldset className="webhook-events-fieldset">
-          <legend>Subscribed events</legend>
+          <legend>{t('createSubscribedEvents')}</legend>
           <p className="webhook-events-hint">
-            Leave all unchecked to use the default template
-            {' '}(<code>session.status_idle</code>, <code>session.error</code>,{' '}
-            <code>session.requires_action</code>).
+            {t('createDefaultTemplateBefore')}
+            <code>session.status_idle</code>, <code>session.error</code>,{' '}
+            <code>session.requires_action</code>
+            {t('createDefaultTemplateAfter')}
           </p>
           <div className="webhook-events-grid">
             {WEBHOOK_EVENTS.map(ev => (
@@ -120,7 +122,7 @@ export default function WebhookCreateForm() {
                   data-testid={`webhook-event-checkbox-${ev.value}`}
                 />
                 <span>
-                  {ev.label}
+                  {t(ev.label)}
                   <code className="webhook-event-code">{ev.value}</code>
                 </span>
               </label>
@@ -141,10 +143,10 @@ export default function WebhookCreateForm() {
             disabled={submitting}
             data-testid="webhook-create-submit"
           >
-            {submitting ? 'Creating…' : 'Create endpoint'}
+            {submitting ? t('common:creating') : t('createSubmit')}
           </button>
           <Link to="/webhooks" className="btn-cancel-link">
-            Cancel
+            {t('common:cancel')}
           </Link>
         </div>
       </form>

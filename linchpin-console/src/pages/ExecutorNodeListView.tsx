@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { ExecutorNode } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -21,6 +22,8 @@ function isValidHttpUrl(value: string): boolean {
 }
 
 export default function ExecutorNodeListView() {
+  const { t, i18n } = useTranslation('executorNodes');
+
   const [nodes, setNodes] = useState<ExecutorNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
@@ -63,7 +66,7 @@ export default function ExecutorNodeListView() {
   const handleCreate = async () => {
     if (!newName.trim() || !newUrl.trim()) return;
     if (newUrlInvalid) {
-      setCreateError('Daemon URL must be a valid http(s) URL, e.g. http://10.0.0.8:8100.');
+      setCreateError(t('registerUrlError'));
       return;
     }
     setCreating(true);
@@ -84,14 +87,14 @@ export default function ExecutorNodeListView() {
       setNewMaxSessions('5');
       setCreateError(null);
       setIssuedToken(created.token);
-      setNotice(`Executor node "${created.name}" registered.`);
+      setNotice(t('registerSuccess', { name: created.name }));
       await fetchNodes();
     } catch (err) {
       const apiErr = err as ApiError;
       setCreateError(
         apiErr.status === 409
-          ? (apiErr.message || 'A node with this name already exists')
-          : (apiErr.message || 'Failed to register executor node'),
+          ? (apiErr.message || t('registerNameConflict'))
+          : (apiErr.message || t('registerFailed')),
       );
     } finally {
       setCreating(false);
@@ -103,7 +106,7 @@ export default function ExecutorNodeListView() {
     try {
       await apiClient.delete(`/v1/executor-nodes/${deleteTarget.id}`);
       setDeleteTarget(null);
-      setNotice(`Executor node "${deleteTarget.name}" removed.`);
+      setNotice(t('deleteSuccess', { name: deleteTarget.name }));
       await fetchNodes();
     } catch (err) {
       setError(err as ApiError);
@@ -127,12 +130,8 @@ export default function ExecutorNodeListView() {
     <div className="executor-node-list-view" data-testid="executor-node-list-view">
       <div className="executor-node-header">
         <div>
-          <h1>Executor Nodes</h1>
-          <p>
-            Register your own executor daemons (BYO compute). Each node runs
-            the Linchpin executor daemon and authenticates with a daemon token
-            issued exactly once at registration time.
-          </p>
+          <h1>{t('listTitle')}</h1>
+          <p>{t('listSubtitle')}</p>
         </div>
         <button
           className="btn-primary"
@@ -142,28 +141,28 @@ export default function ExecutorNodeListView() {
           }}
           data-testid="register-node-btn"
         >
-          Register node
+          {t('listRegisterNode')}
         </button>
       </div>
 
       {issuedToken && (
         <div className="node-token-banner" data-testid="token-banner">
           <div className="node-token-banner-text">
-            <strong>Daemon token (shown once):</strong>
+            <strong>{t('tokenBannerLabel')}</strong>
             <code data-testid="token-value">{issuedToken}</code>
             <span>
-              Copy it now and configure it as
+              {t('tokenBannerHintBefore')}
               {' '}
               <code>LINCHPIN_EXECUTOR_TOKEN</code>
               {' '}
-              on the daemon — it cannot be retrieved again.
+              {t('tokenBannerHintAfter')}
             </span>
           </div>
           <button
             onClick={() => setIssuedToken(null)}
             data-testid="token-dismiss"
           >
-            Dismiss
+            {t('common:close')}
           </button>
         </div>
       )}
@@ -176,22 +175,21 @@ export default function ExecutorNodeListView() {
 
       {nodes.length === 0 ? (
         <p className="empty-text" data-testid="executor-nodes-empty">
-          No executor nodes registered yet. Register a node to run sessions on
-          your own infrastructure.
+          {t('listEmpty')}
         </p>
       ) : (
         <div className="executor-node-table-wrapper">
           <table className="executor-node-table" data-testid="executor-node-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>URL</th>
-                <th>Status</th>
-                <th>Max sessions</th>
-                <th>Token prefix</th>
-                <th>Last heartbeat</th>
-                <th>Created</th>
-                <th>Actions</th>
+                <th>{t('common:name')}</th>
+                <th>{t('listColumnUrl')}</th>
+                <th>{t('listColumnStatus')}</th>
+                <th>{t('listColumnMaxSessions')}</th>
+                <th>{t('listColumnTokenPrefix')}</th>
+                <th>{t('listColumnLastHeartbeat')}</th>
+                <th>{t('common:created')}</th>
+                <th>{t('common:actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -206,7 +204,7 @@ export default function ExecutorNodeListView() {
                       className={`node-status node-status-${node.status}`}
                       data-testid={`node-status-${node.id}`}
                     >
-                      {node.status === 'online' ? 'Online' : 'Offline'}
+                      {node.status === 'online' ? t('listOnline') : t('listOffline')}
                     </span>
                   </td>
                   <td>{node.max_sessions}</td>
@@ -215,17 +213,17 @@ export default function ExecutorNodeListView() {
                   </td>
                   <td>
                     {node.last_heartbeat_at
-                      ? new Date(node.last_heartbeat_at).toLocaleString()
-                      : 'Never'}
+                      ? new Date(node.last_heartbeat_at).toLocaleString(i18n.language)
+                      : t('listNever')}
                   </td>
-                  <td>{new Date(node.created_at).toLocaleString()}</td>
+                  <td>{new Date(node.created_at).toLocaleString(i18n.language)}</td>
                   <td>
                     <button
                       className="btn-sm-danger"
                       onClick={() => setDeleteTarget(node)}
                       data-testid={`node-delete-btn-${node.id}`}
                     >
-                      Delete
+                      {t('common:delete')}
                     </button>
                   </td>
                 </tr>
@@ -239,9 +237,9 @@ export default function ExecutorNodeListView() {
       {createOpen && (
         <div className="node-dialog-overlay">
           <div className="node-dialog" data-testid="node-create-dialog">
-            <h2>Register executor node</h2>
+            <h2>{t('registerTitle')}</h2>
             <div className="form-field">
-              <label htmlFor="node-create-name">Name</label>
+              <label htmlFor="node-create-name">{t('common:name')}</label>
               <input
                 id="node-create-name"
                 value={newName}
@@ -252,7 +250,7 @@ export default function ExecutorNodeListView() {
               />
             </div>
             <div className="form-field">
-              <label htmlFor="node-create-url">Daemon URL</label>
+              <label htmlFor="node-create-url">{t('registerUrlLabel')}</label>
               <input
                 id="node-create-url"
                 type="url"
@@ -264,11 +262,11 @@ export default function ExecutorNodeListView() {
             </div>
             {newUrlInvalid && (
               <div className="form-error" role="alert" data-testid="node-create-url-error">
-                Daemon URL must be a valid http(s) URL, e.g. http://10.0.0.8:8100.
+                {t('registerUrlError')}
               </div>
             )}
             <div className="form-field">
-              <label htmlFor="node-create-max-sessions">Max concurrent sessions</label>
+              <label htmlFor="node-create-max-sessions">{t('registerMaxSessionsLabel')}</label>
               <input
                 id="node-create-max-sessions"
                 type="number"
@@ -288,7 +286,7 @@ export default function ExecutorNodeListView() {
                 onClick={() => setCreateOpen(false)}
                 data-testid="node-create-cancel"
               >
-                Cancel
+                {t('common:cancel')}
               </button>
               <button
                 className="btn-primary"
@@ -296,7 +294,7 @@ export default function ExecutorNodeListView() {
                 onClick={handleCreate}
                 data-testid="node-create-submit"
               >
-                {creating ? 'Registering…' : 'Register'}
+                {creating ? t('registerSubmitting') : t('registerSubmit')}
               </button>
             </div>
           </div>
@@ -305,10 +303,10 @@ export default function ExecutorNodeListView() {
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Delete Executor Node"
+        title={t('deleteDialogTitle')}
         message={
           deleteTarget
-            ? `Remove "${deleteTarget.name}" from the registry? The daemon token becomes unusable and the node will no longer accept sessions.`
+            ? t('deleteDialogMessage', { name: deleteTarget.name })
             : ''
         }
         onConfirm={handleDelete}

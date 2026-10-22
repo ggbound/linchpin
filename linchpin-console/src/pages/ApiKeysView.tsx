@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { ApiKey, ApiKeyCreated, Project, UpdateProjectRequest } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -14,23 +15,24 @@ interface QuotaDraft {
 // Mirrors the backend's centralized scope enforcement (app/auth.py
 // _check_scopes): mutating requests to /v1/{resource}/... require
 // "{resource}:write" or "*".
-const SCOPE_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: '*', label: '* (full access)' },
-  { value: 'agents:write', label: 'agents' },
-  { value: 'sessions:write', label: 'sessions' },
-  { value: 'environments:write', label: 'environments' },
-  { value: 'memory_stores:write', label: 'memory stores' },
-  { value: 'vaults:write', label: 'vaults' },
-  { value: 'deployments:write', label: 'deployments' },
-  { value: 'webhook_endpoints:write', label: 'webhook endpoints' },
-  { value: 'skills:write', label: 'skills' },
-  { value: 'dreams:write', label: 'dreams' },
-  { value: 'files:write', label: 'files' },
-  { value: 'artifacts:write', label: 'artifacts' },
-  { value: 'executor-nodes:write', label: 'executor nodes' },
+const SCOPE_OPTIONS: Array<{ value: string; labelKey: string }> = [
+  { value: '*', labelKey: 'scopeAll' },
+  { value: 'agents:write', labelKey: 'scopeAgents' },
+  { value: 'sessions:write', labelKey: 'scopeSessions' },
+  { value: 'environments:write', labelKey: 'scopeEnvironments' },
+  { value: 'memory_stores:write', labelKey: 'scopeMemoryStores' },
+  { value: 'vaults:write', labelKey: 'scopeVaults' },
+  { value: 'deployments:write', labelKey: 'scopeDeployments' },
+  { value: 'webhook_endpoints:write', labelKey: 'scopeWebhookEndpoints' },
+  { value: 'skills:write', labelKey: 'scopeSkills' },
+  { value: 'dreams:write', labelKey: 'scopeDreams' },
+  { value: 'files:write', labelKey: 'scopeFiles' },
+  { value: 'artifacts:write', labelKey: 'scopeArtifacts' },
+  { value: 'executor-nodes:write', labelKey: 'scopeExecutorNodes' },
 ];
 
 export default function ApiKeysView() {
+  const { t, i18n } = useTranslation('apiKeys');
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,11 +96,11 @@ export default function ApiKeysView() {
     const scopes = scopesSelected;
     const rpm = rpmInput.trim() ? Number(rpmInput.trim()) : null;
     if (rpm !== null && (!Number.isFinite(rpm) || rpm <= 0)) {
-      setFormError('Rate limit must be a positive number (requests per minute).');
+      setFormError(t('rateLimitInvalid'));
       return;
     }
     if (scopes.length === 0) {
-      setFormError('Select at least one scope.');
+      setFormError(t('scopesRequired'));
       return;
     }
 
@@ -119,7 +121,7 @@ export default function ApiKeysView() {
       setRpmInput('');
     } catch (err) {
       const apiErr = err as ApiError;
-      setFormError(apiErr.message || 'Failed to create API key');
+      setFormError(apiErr.message || t('createFailed'));
     } finally {
       setCreating(false);
     }
@@ -146,7 +148,7 @@ export default function ApiKeysView() {
       setRevokeTarget(null);
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to revoke API key');
+      setActionError(apiErr.message || t('revokeFailed'));
       setRevokeTarget(null);
     } finally {
       setRevoking(false);
@@ -172,11 +174,11 @@ export default function ApiKeysView() {
         monthly_token_budget: draft.budget.trim() === '' ? null : Number(draft.budget.trim()),
       };
       if (body.max_concurrent_sessions !== null && !Number.isFinite(body.max_concurrent_sessions)) {
-        setQuotaError(`Invalid value for "${project.name}" max concurrent sessions.`);
+        setQuotaError(t('invalidMaxSessions', { name: project.name }));
         return;
       }
       if (body.monthly_token_budget !== null && !Number.isFinite(body.monthly_token_budget)) {
-        setQuotaError(`Invalid value for "${project.name}" monthly token budget.`);
+        setQuotaError(t('invalidTokenBudget', { name: project.name }));
         return;
       }
       const updated = await apiClient.patch<Project>(`/v1/projects/${project.id}`, body);
@@ -188,13 +190,13 @@ export default function ApiKeysView() {
           budget: updated.monthly_token_budget != null ? String(updated.monthly_token_budget) : '',
         },
       }));
-      setQuotaNotice(`Quota updated for "${project.name}". Leaving a field empty clears the limit.`);
+      setQuotaNotice(t('quotaUpdated', { name: project.name }));
     } catch (err) {
       const apiErr = err as ApiError;
       if (apiErr.status === 403) {
-        setQuotaError('Quota management requires the bootstrap API key.');
+        setQuotaError(t('quotaRequiresBootstrapKey'));
       } else {
-        setQuotaError(apiErr.message || 'Failed to update project quota');
+        setQuotaError(apiErr.message || t('quotaUpdateFailed'));
       }
     } finally {
       setSavingQuotaId(null);
@@ -216,23 +218,20 @@ export default function ApiKeysView() {
   return (
     <div className="apikeys-view" data-testid="apikeys-view">
       <div className="apikeys-header">
-        <h1>API Keys</h1>
-        <p>
-          Keys authenticate console and API clients. The plaintext key is shown once
-          at creation — store it securely.
-        </p>
+        <h1>{t('title')}</h1>
+        <p>{t('subtitle')}</p>
       </div>
 
       {createdKey && (
         <div className="created-key-banner" data-testid="created-key-banner">
           <div className="created-key-header">
             <strong>
-              {createdKey.name || 'New API key'} created — copy it now, it will not be shown again
+              {t('createdBanner', { name: createdKey.name || t('defaultKeyName') })}
             </strong>
             <button
               className="created-key-dismiss"
               onClick={() => setCreatedKey(null)}
-              aria-label="Dismiss"
+              aria-label={t('dismiss')}
               data-testid="created-key-dismiss"
             >
               ✕
@@ -241,7 +240,7 @@ export default function ApiKeysView() {
           <div className="created-key-row">
             <code data-testid="created-key-value">{createdKey.key}</code>
             <button className="btn-copy-key" onClick={handleCopyKey}>
-              {keyCopied ? 'Copied' : 'Copy'}
+              {keyCopied ? t('common:copied') : t('common:copy')}
             </button>
           </div>
         </div>
@@ -254,29 +253,29 @@ export default function ApiKeysView() {
       )}
 
       <section className="detail-section" data-testid="apikey-create-section">
-        <h2>Create API Key</h2>
+        <h2>{t('createTitle')}</h2>
         <form className="apikey-create-form" onSubmit={handleCreateKey}>
           <div className="apikey-form-row">
             <div className="apikey-form-field">
-              <label htmlFor="apikey-name">Name</label>
+              <label htmlFor="apikey-name">{t('common:name')}</label>
               <input
                 id="apikey-name"
                 type="text"
                 value={name}
                 onChange={e => setName(e.target.value)}
-                placeholder="e.g. ci-pipeline"
+                placeholder={t('namePlaceholder')}
                 data-testid="apikey-create-name"
               />
             </div>
             <div className="apikey-form-field">
-              <label htmlFor="apikey-project">Project (optional)</label>
+              <label htmlFor="apikey-project">{t('projectLabel')}</label>
               <select
                 id="apikey-project"
                 value={projectId}
                 onChange={e => setProjectId(e.target.value)}
                 data-testid="apikey-create-project"
               >
-                <option value="">— none —</option>
+                <option value="">{t('noneOption')}</option>
                 {projects.map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
@@ -285,8 +284,8 @@ export default function ApiKeysView() {
           </div>
           <div className="apikey-form-row">
             <div className="apikey-form-field apikey-scopes-field">
-              <span className="apikey-form-field-label">Scopes</span>
-              <div className="scope-checks" role="group" aria-label="Scopes" data-testid="apikey-create-scopes">
+              <span className="apikey-form-field-label">{t('scopes')}</span>
+              <div className="scope-checks" role="group" aria-label={t('scopes')} data-testid="apikey-create-scopes">
                 {SCOPE_OPTIONS.map(opt => (
                   <label key={opt.value} className="scope-check">
                     <input
@@ -300,28 +299,28 @@ export default function ApiKeysView() {
                         )
                       }
                     />
-                    <span>{opt.label}</span>
+                    <span>{t(opt.labelKey)}</span>
                   </label>
                 ))}
               </div>
               <p className="apikey-scopes-hint">
-                Read requests are always allowed; write scopes gate mutations.
+                {t('scopesHint')}
               </p>
               {scopesSelected.length === 0 && (
                 <div className="form-error" role="alert" data-testid="apikey-scopes-error">
-                  Select at least one scope.
+                  {t('scopesRequired')}
                 </div>
               )}
             </div>
             <div className="apikey-form-field">
-              <label htmlFor="apikey-rpm">Rate limit (RPM, optional)</label>
+              <label htmlFor="apikey-rpm">{t('rateLimitField')}</label>
               <input
                 id="apikey-rpm"
                 type="number"
                 min={1}
                 value={rpmInput}
                 onChange={e => setRpmInput(e.target.value)}
-                placeholder="unlimited"
+                placeholder={t('unlimited')}
                 data-testid="apikey-create-rpm"
               />
             </div>
@@ -337,27 +336,27 @@ export default function ApiKeysView() {
             disabled={creating || scopesSelected.length === 0}
             data-testid="apikey-create-submit"
           >
-            {creating ? 'Creating…' : 'Create key'}
+            {creating ? t('common:creating') : t('createKey')}
           </button>
         </form>
       </section>
 
       <section className="detail-section" data-testid="apikeys-list-section">
-        <h2>Keys ({keys.length})</h2>
+        <h2>{t('keysCount', { total: keys.length })}</h2>
         {keys.length === 0 ? (
-          <p className="empty-text">No API keys yet. Create one above.</p>
+          <p className="empty-text">{t('emptyKeys')}</p>
         ) : (
           <div className="apikeys-table-wrapper">
             <table className="apikeys-table" data-testid="apikeys-table">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Prefix</th>
-                  <th>Scopes</th>
-                  <th>Status</th>
-                  <th>Rate Limit</th>
-                  <th>Last Used</th>
-                  <th>Actions</th>
+                  <th>{t('common:name')}</th>
+                  <th>{t('prefix')}</th>
+                  <th>{t('scopes')}</th>
+                  <th>{t('statusLabel')}</th>
+                  <th>{t('rateLimit')}</th>
+                  <th>{t('lastUsed')}</th>
+                  <th>{t('common:actions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -377,8 +376,8 @@ export default function ApiKeysView() {
                     <td>{key.rate_limit_rpm != null ? `${key.rate_limit_rpm} rpm` : '—'}</td>
                     <td>
                       {key.last_used_at
-                        ? new Date(key.last_used_at).toLocaleString()
-                        : 'never'}
+                        ? new Date(key.last_used_at).toLocaleString(i18n.language)
+                        : t('never')}
                     </td>
                     <td>
                       <button
@@ -387,7 +386,7 @@ export default function ApiKeysView() {
                         onClick={() => setRevokeTarget(key)}
                         data-testid={`apikey-revoke-btn-${key.id}`}
                       >
-                        Revoke
+                        {t('revoke')}
                       </button>
                     </td>
                   </tr>
@@ -399,10 +398,9 @@ export default function ApiKeysView() {
       </section>
 
       <section className="detail-section" data-testid="projects-quota-section">
-        <h2>Project Quotas</h2>
+        <h2>{t('projectQuotas')}</h2>
         <p className="section-hint">
-          Limits per project. Leave a field empty to clear the limit (sends an
-          explicit null). Quota changes require the bootstrap API key.
+          {t('quotaHint')}
         </p>
         {quotaNotice && (
           <div className="skill-notice" role="status" data-testid="quota-notice">
@@ -415,15 +413,15 @@ export default function ApiKeysView() {
           </div>
         )}
         {projects.length === 0 ? (
-          <p className="empty-text">No projects found.</p>
+          <p className="empty-text">{t('noProjects')}</p>
         ) : (
           <table className="quota-table" data-testid="quota-table">
             <thead>
               <tr>
-                <th>Project</th>
-                <th>Max Concurrent Sessions</th>
-                <th>Monthly Token Budget</th>
-                <th>Actions</th>
+                <th>{t('project')}</th>
+                <th>{t('maxConcurrentSessions')}</th>
+                <th>{t('monthlyTokenBudget')}</th>
+                <th>{t('common:actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -440,7 +438,7 @@ export default function ApiKeysView() {
                       className="quota-input"
                       value={quotaDrafts[project.id]?.max ?? ''}
                       onChange={e => updateQuotaDraft(project.id, 'max', e.target.value)}
-                      placeholder="unlimited"
+                      placeholder={t('unlimited')}
                       data-testid={`quota-max-input-${project.id}`}
                     />
                   </td>
@@ -451,7 +449,7 @@ export default function ApiKeysView() {
                       className="quota-input"
                       value={quotaDrafts[project.id]?.budget ?? ''}
                       onChange={e => updateQuotaDraft(project.id, 'budget', e.target.value)}
-                      placeholder="unlimited"
+                      placeholder={t('unlimited')}
                       data-testid={`quota-budget-input-${project.id}`}
                     />
                   </td>
@@ -462,7 +460,7 @@ export default function ApiKeysView() {
                       onClick={() => handleSaveQuota(project)}
                       data-testid={`quota-save-btn-${project.id}`}
                     >
-                      {savingQuotaId === project.id ? 'Saving…' : 'Save'}
+                      {savingQuotaId === project.id ? t('common:saving') : t('common:save')}
                     </button>
                   </td>
                 </tr>
@@ -474,10 +472,10 @@ export default function ApiKeysView() {
 
       <ConfirmDialog
         open={revokeTarget !== null}
-        title="Revoke API Key"
+        title={t('revokeTitle')}
         message={
           revokeTarget
-            ? `Are you sure you want to revoke "${revokeTarget.name || revokeTarget.prefix}…"? Clients using it will immediately lose access.`
+            ? t('revokeMessage', { name: revokeTarget.name || `${revokeTarget.prefix}…` })
             : ''
         }
         onConfirm={handleRevoke}

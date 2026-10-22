@@ -1,10 +1,17 @@
 import { useEffect, useState, useCallback, type ChangeEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { FileRecord, PaginatedResponse } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import ConfirmDialog from '../components/ConfirmDialog';
 import './FilesView.css';
+
+const SOURCE_LABELS: Record<string, string> = {
+  upload: 'sourceUpload',
+  deliverable: 'sourceDeliverable',
+  artifact: 'sourceArtifact',
+};
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -14,6 +21,7 @@ function formatBytes(bytes: number): string {
 }
 
 export default function FilesView() {
+  const { t, i18n } = useTranslation('files');
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -50,8 +58,8 @@ export default function FilesView() {
       const apiErr = err as ApiError;
       setActionError(
         apiErr.status === 413
-          ? 'File is too large — it exceeds the server upload size cap.'
-          : apiErr.message || 'Failed to upload file'
+          ? t('fileTooLarge')
+          : apiErr.message || t('uploadFailed')
       );
     } finally {
       setUploading(false);
@@ -71,7 +79,7 @@ export default function FilesView() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setActionError((err as ApiError).message || 'Failed to download file');
+      setActionError((err as ApiError).message || t('downloadFailed'));
     }
   };
 
@@ -85,7 +93,7 @@ export default function FilesView() {
       await fetchPage();
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to delete file');
+      setActionError(apiErr.message || t('deleteFailed'));
       setDeleteTarget(null);
     } finally {
       setDeletingId(null);
@@ -115,10 +123,9 @@ export default function FilesView() {
     <div className="files-view" data-testid="files-view">
       <div className="files-header">
         <div>
-          <h1>Files</h1>
+          <h1>{t('title')}</h1>
           <p>
-            Unscoped files for this project. Uploaded files are available to mount
-            into sessions; only agent-produced deliverables are downloadable.
+            {t('subtitle')}
           </p>
         </div>
         <div className="files-upload">
@@ -131,7 +138,7 @@ export default function FilesView() {
             disabled={uploading}
           />
           <label htmlFor="files-upload-input" className="btn-primary files-upload-btn" data-testid="files-upload-btn">
-            {uploading ? 'Uploading…' : 'Upload file'}
+            {uploading ? t('uploading') : t('uploadFile')}
           </label>
         </div>
       </div>
@@ -144,7 +151,7 @@ export default function FilesView() {
 
       {hasMore && (
         <div className="files-more-note">
-          Showing the first 100 files.
+          {t('moreNote')}
         </div>
       )}
 
@@ -152,20 +159,20 @@ export default function FilesView() {
         <table className="files-table" data-testid="files-table">
           <thead>
             <tr>
-              <th>Filename</th>
-              <th>Content Type</th>
-              <th>Size</th>
-              <th>Source</th>
-              <th>Downloadable</th>
-              <th>Created</th>
-              <th>Actions</th>
+              <th>{t('colFilename')}</th>
+              <th>{t('colContentType')}</th>
+              <th>{t('colSize')}</th>
+              <th>{t('colSource')}</th>
+              <th>{t('colDownloadable')}</th>
+              <th>{t('common:created')}</th>
+              <th>{t('common:actions')}</th>
             </tr>
           </thead>
           <tbody>
             {files.length === 0 ? (
               <tr>
                 <td colSpan={7} className="empty-row" data-testid="files-empty">
-                  No files yet. Upload one to make it available for session mounts.
+                  {t('empty')}
                 </td>
               </tr>
             ) : (
@@ -178,13 +185,15 @@ export default function FilesView() {
                   <td data-testid="files-cell-size">{formatBytes(file.size_bytes)}</td>
                   <td>
                     <span className={`files-source files-source--${file.source}`}>
-                      {file.source}
+                      {SOURCE_LABELS[file.source]
+                        ? t(SOURCE_LABELS[file.source])
+                        : file.source}
                     </span>
                   </td>
                   <td data-testid="files-cell-downloadable">
-                    {file.downloadable ? 'Yes' : 'No'}
+                    {file.downloadable ? t('common:yes') : t('common:no')}
                   </td>
-                  <td>{new Date(file.created_at).toLocaleString()}</td>
+                  <td>{new Date(file.created_at).toLocaleString(i18n.language)}</td>
                   <td>
                     <div className="files-actions-cell">
                       {file.downloadable && (
@@ -194,7 +203,7 @@ export default function FilesView() {
                           onClick={() => handleDownload(file)}
                           data-testid="files-download-btn"
                         >
-                          Download
+                          {t('common:download')}
                         </button>
                       )}
                       <button
@@ -202,9 +211,9 @@ export default function FilesView() {
                         disabled={deletingId === file.id || uploading}
                         onClick={() => setDeleteTarget(file)}
                         data-testid="files-delete-btn"
-                      >
-                        Delete
-                      </button>
+                        >
+                          {t('common:delete')}
+                        </button>
                     </div>
                   </td>
                 </tr>
@@ -216,8 +225,8 @@ export default function FilesView() {
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Delete file"
-        message={`Delete "${deleteTarget?.filename ?? ''}"? This permanently removes the file and its stored bytes. Files currently mounted in a session cannot be deleted.`}
+        title={t('deleteTitle')}
+        message={t('deleteMessage', { filename: deleteTarget?.filename ?? '' })}
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
       />

@@ -1,0 +1,13 @@
+{
+  "nameRuleHint": "仅限小写字母、数字、_ 或 -（最多 64 个字符，以字母开头）",
+  "nameUnique": "名称必须唯一",
+  "agent": "智能体",
+  "selectAgent": "请选择智能体…",
+  "model": "模型：{{model}}",
+  "environmentOptional": "环境（可选）",
+  "inheritSessionEnvironment": "继承会话环境",
+  "descriptionPlaceholder": "何时派生该子智能体",
+  "remove": "移除",
+  "addSubagent": "+ 添加子智能体",
+  "maxSubagents": "最多 {{count}} 个子智能体"
+}

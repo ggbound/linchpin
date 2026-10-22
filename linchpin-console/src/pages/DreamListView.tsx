@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
 import { apiClient, ApiError } from '../api/client';
 import type { Dream, DreamStatus, DreamListResponse, Agent, MemoryStore, PaginatedResponse } from '../types';
@@ -23,6 +24,7 @@ const STATUS_FILTERS: Array<DreamStatus | 'all'> = [
 
 export default function DreamListView() {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation('dreams');
 
   const [dreams, setDreams] = useState<Dream[]>([]);
   const [statusFilter, setStatusFilter] = useState<DreamStatus | 'all'>('all');
@@ -76,7 +78,7 @@ export default function DreamListView() {
       setDreams(prev => prev.map(d => (d.id === dream.id ? updated : d)));
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to cancel dream');
+      setActionError(apiErr.message || t('listCancelFailed'));
     } finally {
       setCancelingId(null);
     }
@@ -102,18 +104,15 @@ export default function DreamListView() {
     <div className="dream-list-view" data-testid="dream-list-view">
       <div className="dream-list-header">
         <div>
-          <h1>Dreams</h1>
-          <p>
-            Curate past sessions into distilled memory stores. Each Dream lets a dreamer
-            agent read filtered session history and write a curated memory store.
-          </p>
+          <h1>{t('listTitle')}</h1>
+          <p>{t('listSubtitle')}</p>
         </div>
         <button
           className="btn-primary"
           data-testid="new-dream-btn"
           onClick={() => navigate('/dreams/new')}
         >
-          New dream
+          {t('listNewDream')}
         </button>
       </div>
 
@@ -124,7 +123,7 @@ export default function DreamListView() {
       )}
 
       <div className="dream-filter-row">
-        <label htmlFor="dream-status-filter">Status</label>
+        <label htmlFor="dream-status-filter">{t('listStatusLabel')}</label>
         <select
           id="dream-status-filter"
           value={statusFilter}
@@ -132,7 +131,9 @@ export default function DreamListView() {
           data-testid="dream-status-filter"
         >
           {STATUS_FILTERS.map(s => (
-            <option key={s} value={s}>{s === 'all' ? 'All statuses' : s}</option>
+            <option key={s} value={s}>
+              {s === 'all' ? t('listAllStatuses') : t(`status:${s}`, { defaultValue: String(s) })}
+            </option>
           ))}
         </select>
       </div>
@@ -141,21 +142,21 @@ export default function DreamListView() {
         <table className="dream-table" data-testid="dream-table">
           <thead>
             <tr>
-              <th>Output Store</th>
-              <th>Input Store</th>
-              <th>Dreamer Agent</th>
-              <th>Status</th>
-              <th>Created</th>
-              <th>Ended</th>
-              <th>Error</th>
-              <th>Actions</th>
+              <th>{t('listColumnOutputStore')}</th>
+              <th>{t('listColumnInputStore')}</th>
+              <th>{t('listColumnDreamerAgent')}</th>
+              <th>{t('listColumnStatus')}</th>
+              <th>{t('common:created')}</th>
+              <th>{t('listColumnEnded')}</th>
+              <th>{t('common:error')}</th>
+              <th>{t('common:actions')}</th>
             </tr>
           </thead>
           <tbody>
             {dreams.length === 0 ? (
               <tr>
                 <td colSpan={8} className="empty-row" data-testid="dream-empty">
-                  No dreams yet. Create one to curate past sessions into a memory store.
+                  {t('listEmpty')}
                 </td>
               </tr>
             ) : (
@@ -191,16 +192,16 @@ export default function DreamListView() {
                         {agentNames[dream.dreamer_agent_id] || dream.dreamer_agent_id.slice(0, 8)}
                       </Link>
                     ) : (
-                      'Default'
+                      t('listDefaultAgent')
                     )}
                   </td>
                   <td>
                     <span className={`dream-status dream-status--${dream.status}`} data-testid="dream-status">
-                      {dream.status}
+                      {t(`status:${dream.status}`, { defaultValue: String(dream.status) })}
                     </span>
                   </td>
-                  <td>{new Date(dream.created_at).toLocaleString()}</td>
-                  <td>{dream.ended_at ? new Date(dream.ended_at).toLocaleString() : '—'}</td>
+                  <td>{new Date(dream.created_at).toLocaleString(i18n.language)}</td>
+                  <td>{dream.ended_at ? new Date(dream.ended_at).toLocaleString(i18n.language) : '—'}</td>
                   <td
                     className="dream-error-cell"
                     title={dream.error || undefined}
@@ -220,7 +221,7 @@ export default function DreamListView() {
                           onClick={() => setCancelTarget(dream)}
                           data-testid="dream-cancel-btn"
                         >
-                          {cancelingId === dream.id ? 'Canceling…' : 'Cancel'}
+                          {cancelingId === dream.id ? t('listCanceling') : t('common:cancel')}
                         </button>
                       )}
                     </div>
@@ -234,10 +235,10 @@ export default function DreamListView() {
 
       <ConfirmDialog
         open={cancelTarget !== null}
-        title="Cancel Dream"
+        title={t('listCancelDialogTitle')}
         message={
           cancelTarget
-            ? `Cancel "${cancelTarget.output_store_name}"? The dreamer session will be terminated and no output store will be produced.`
+            ? t('listCancelDialogMessage', { name: cancelTarget.output_store_name })
             : ''
         }
         onConfirm={() => handleCancel(cancelTarget)}

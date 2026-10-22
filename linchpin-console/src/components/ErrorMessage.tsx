@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import './ErrorMessage.css';
 
 interface ErrorMessageProps {
@@ -7,10 +8,11 @@ interface ErrorMessageProps {
 }
 
 export default function ErrorMessage({ status, message, onRetry }: ErrorMessageProps) {
+  const { t } = useTranslation();
   return (
     <div className="error-message" data-testid="error-message" role="alert">
       <span className="error-message-status" data-testid="error-status">
-        {status ? `Error ${status}` : 'Connection error'}
+        {status ? t('common:errorWithStatus', { status }) : t('common:connectionError')}
       </span>
       <span className="error-message-text" data-testid="error-text">
         {message}
@@ -21,7 +23,7 @@ export default function ErrorMessage({ status, message, onRetry }: ErrorMessageP
           onClick={onRetry}
           data-testid="error-retry"
         >
-          Retry
+          {t('common:retry')}
         </button>
       )}
     </div>

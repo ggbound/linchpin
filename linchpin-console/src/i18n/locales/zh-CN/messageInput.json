@@ -1,0 +1,13 @@
+{
+  "sessionInactive": "该会话已不再活跃。",
+  "sessionEnded": "会话已结束",
+  "steerHint": "智能体运行中，消息将在下一个安全点作为引导送达。",
+  "placeholder": "输入消息…",
+  "send": "发送",
+  "sending": "发送中…",
+  "steer": "引导",
+  "interrupt": "中断",
+  "interrupting": "中断中…",
+  "sendFailed": "发送消息失败",
+  "interruptFailed": "中断失败"
+}

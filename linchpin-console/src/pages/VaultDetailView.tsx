@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type {
   Vault,
@@ -16,18 +17,27 @@ import './VaultDetailView.css';
 
 /** Secret fields editable per credential type (aligned with backend secrets schema). */
 const SECRET_FIELDS: Record<CredentialType, { key: keyof UpdateCredentialRequest; label: string; required?: boolean }[]> = {
-  bearer_token: [{ key: 'token', label: 'Token', required: true }],
-  api_key: [{ key: 'api_key', label: 'API Key', required: true }],
+  bearer_token: [{ key: 'token', label: 'detailToken', required: true }],
+  api_key: [{ key: 'api_key', label: 'detailApiKey', required: true }],
   oauth: [
-    { key: 'access_token', label: 'Access Token', required: true },
-    { key: 'refresh_token', label: 'Refresh Token' },
-    { key: 'client_secret', label: 'Client Secret' },
+    { key: 'access_token', label: 'detailAccessToken', required: true },
+    { key: 'refresh_token', label: 'detailRefreshToken' },
+    { key: 'client_secret', label: 'detailClientSecret' },
   ],
-  byok_kek: [{ key: 'kek', label: 'KEK (Fernet key)', required: true }],
+  byok_kek: [{ key: 'kek', label: 'detailKek', required: true }],
+};
+
+/** i18n keys for credential type display names. */
+const CRED_TYPE_LABELS: Record<CredentialType, string> = {
+  bearer_token: 'detailCredTypeBearer',
+  api_key: 'detailCredTypeApiKey',
+  oauth: 'detailCredTypeOauth',
+  byok_kek: 'detailCredTypeByokKek',
 };
 
 export default function VaultDetailView() {
   const { id } = useParams<{ id: string }>();
+  const { t, i18n } = useTranslation('vaults');
   const [vault, setVault] = useState<Vault | null>(null);
   const [credentials, setCredentials] = useState<CredentialResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,7 +137,7 @@ export default function VaultDetailView() {
       setShowAddForm(false);
     } catch (err) {
       const apiErr = err as ApiError;
-      setAddCredError(apiErr.message || 'Failed to add credential');
+      setAddCredError(apiErr.message || t('detailAddCredFailed'));
     } finally {
       setAddingCred(false);
     }
@@ -152,7 +162,7 @@ export default function VaultDetailView() {
         }
       }
       if (Object.keys(body).length === 0) {
-        setEditSecretsError('Provide at least one secret value.');
+        setEditSecretsError(t('detailProvideSecret'));
         return;
       }
 
@@ -165,7 +175,7 @@ export default function VaultDetailView() {
       setEditSecrets({});
     } catch (err) {
       const apiErr = err as ApiError;
-      setEditSecretsError(apiErr.message || 'Failed to update secrets');
+      setEditSecretsError(apiErr.message || t('detailUpdateSecretsFailed'));
     } finally {
       setSavingSecrets(false);
     }
@@ -179,7 +189,7 @@ export default function VaultDetailView() {
       setCredentials(prev => prev.filter(c => c.id !== deleteCredTarget.id));
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to delete credential');
+      setActionError(apiErr.message || t('detailDeleteCredFailed'));
     } finally {
       setDeleteCredTarget(null);
     }
@@ -197,7 +207,7 @@ export default function VaultDetailView() {
       );
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to archive credential');
+      setActionError(apiErr.message || t('detailArchiveCredFailed'));
     } finally {
       setArchiveCredTarget(null);
     }
@@ -225,27 +235,27 @@ export default function VaultDetailView() {
   return (
     <div className="vault-detail-view" data-testid="vault-detail-view">
       <Link to="/vaults" className="back-link" data-testid="back-link">
-        ← Vaults
+        ← {t('detailBackToVaults')}
       </Link>
 
       <div className="vault-detail-header">
         <div className="vault-detail-title-row">
           <h1 data-testid="vault-name">{vault.display_name}</h1>
           {isArchived && (
-            <span className="archived-badge" data-testid="archived-badge">Archived</span>
+            <span className="archived-badge" data-testid="archived-badge">{t('status:archived')}</span>
           )}
         </div>
         <div className="vault-detail-meta">
           <span data-testid="vault-id"><code>{vault.id}</code></span>
           <span className="meta-separator">·</span>
           <span data-testid="vault-created">
-            Created {new Date(vault.created_at).toLocaleString()}
+            {t('detailCreatedAt', { time: new Date(vault.created_at).toLocaleString(i18n.language) })}
           </span>
           {vault.archived_at && (
             <>
               <span className="meta-separator">·</span>
               <span data-testid="vault-archived-at">
-                Archived {new Date(vault.archived_at).toLocaleString()}
+                {t('detailArchivedAt', { time: new Date(vault.archived_at).toLocaleString(i18n.language) })}
               </span>
             </>
           )}
@@ -258,7 +268,7 @@ export default function VaultDetailView() {
 
       <section className="detail-section" data-testid="credentials-section">
         <h2>
-          Credentials ({credentials.length})
+          {t('detailCredentialsCount', { total: credentials.length })}
           {!isArchived && (
             <button
               className="btn-primary"
@@ -266,7 +276,7 @@ export default function VaultDetailView() {
               onClick={() => { setShowAddForm(s => !s); resetAddForm(); }}
               data-testid="add-credential-btn"
             >
-              {showAddForm ? 'Cancel' : 'Add credential'}
+              {showAddForm ? t('common:cancel') : t('detailAddCredential')}
             </button>
           )}
         </h2>
@@ -275,22 +285,21 @@ export default function VaultDetailView() {
           <form className="add-credential-form" onSubmit={handleAddCredential} data-testid="add-credential-form">
             <div className="form-row">
               <div className="form-field">
-                <label htmlFor="cred-type">Type</label>
+                <label htmlFor="cred-type">{t('common:type')}</label>
                 <select
                   id="cred-type"
                   value={credType}
                   onChange={e => setCredType(e.target.value as CredentialType)}
                   data-testid="cred-type-select"
                 >
-                  <option value="bearer_token">Bearer Token</option>
-                  <option value="api_key">API Key</option>
-                  <option value="oauth">OAuth</option>
-                  <option value="byok_kek">BYOK KEK (encryption key)</option>
+                  <option value="bearer_token">{t(CRED_TYPE_LABELS.bearer_token)}</option>
+                  <option value="api_key">{t(CRED_TYPE_LABELS.api_key)}</option>
+                  <option value="oauth">{t(CRED_TYPE_LABELS.oauth)}</option>
+                  <option value="byok_kek">{t(CRED_TYPE_LABELS.byok_kek)}</option>
                 </select>
                 {credType === 'byok_kek' && (
                   <p className="section-hint" data-testid="kek-hint">
-                    A customer-managed Fernet key-encryption-key used for event encryption
-                    (x-kek-credential-id on session creation).
+                    {t('detailKekHint')}
                   </p>
                 )}
               </div>
@@ -299,7 +308,7 @@ export default function VaultDetailView() {
             {credType === 'bearer_token' && (
               <div className="form-row">
                 <div className="form-field">
-                  <label htmlFor="cred-mcp-url">MCP Server URL</label>
+                  <label htmlFor="cred-mcp-url">{t('detailMcpUrlLabel')}</label>
                   <input
                     id="cred-mcp-url"
                     type="text"
@@ -311,13 +320,13 @@ export default function VaultDetailView() {
                   />
                 </div>
                 <div className="form-field">
-                  <label htmlFor="cred-token">Token</label>
+                  <label htmlFor="cred-token">{t('detailToken')}</label>
                   <input
                     id="cred-token"
                     type="password"
                     value={tokenVal}
                     onChange={e => setTokenVal(e.target.value)}
-                    placeholder="Bearer token"
+                    placeholder={t('detailTokenPlaceholder')}
                     required
                     data-testid="cred-token-input"
                   />
@@ -328,7 +337,7 @@ export default function VaultDetailView() {
             {credType === 'api_key' && (
               <div className="form-row">
                 <div className="form-field">
-                  <label htmlFor="cred-provider">Provider</label>
+                  <label htmlFor="cred-provider">{t('detailProvider')}</label>
                   <select
                     id="cred-provider"
                     value={provider}
@@ -340,13 +349,13 @@ export default function VaultDetailView() {
                   </select>
                 </div>
                 <div className="form-field">
-                  <label htmlFor="cred-api-key">API Key</label>
+                  <label htmlFor="cred-api-key">{t('detailApiKey')}</label>
                   <input
                     id="cred-api-key"
                     type="password"
                     value={apiKeyVal}
                     onChange={e => setApiKeyVal(e.target.value)}
-                    placeholder="API key"
+                    placeholder={t('detailApiKeyPlaceholder')}
                     required
                     data-testid="cred-api-key-input"
                   />
@@ -357,13 +366,13 @@ export default function VaultDetailView() {
             {credType === 'byok_kek' && (
               <div className="form-row">
                 <div className="form-field">
-                  <label htmlFor="cred-kek">KEK (Fernet key)</label>
+                  <label htmlFor="cred-kek">{t('detailKek')}</label>
                   <input
                     id="cred-kek"
                     type="password"
                     value={kekVal}
                     onChange={e => setKekVal(e.target.value)}
-                    placeholder="e.g. gAAAAA... (Fernet.generate_key())"
+                    placeholder={t('detailKekPlaceholder')}
                     required
                     data-testid="cred-kek-input"
                   />
@@ -375,7 +384,7 @@ export default function VaultDetailView() {
               <>
                 <div className="form-row">
                   <div className="form-field">
-                    <label htmlFor="cred-oauth-url">MCP Server URL</label>
+                    <label htmlFor="cred-oauth-url">{t('detailMcpUrlLabel')}</label>
                     <input
                       id="cred-oauth-url"
                       type="text"
@@ -387,13 +396,13 @@ export default function VaultDetailView() {
                     />
                   </div>
                   <div className="form-field">
-                    <label htmlFor="cred-access-token">Access Token</label>
+                    <label htmlFor="cred-access-token">{t('detailAccessToken')}</label>
                     <input
                       id="cred-access-token"
                       type="password"
                       value={accessTokenVal}
                       onChange={e => setAccessTokenVal(e.target.value)}
-                      placeholder="Access token"
+                      placeholder={t('detailAccessToken')}
                       required
                       data-testid="cred-access-token-input"
                     />
@@ -401,35 +410,35 @@ export default function VaultDetailView() {
                 </div>
                 <div className="form-row">
                   <div className="form-field">
-                    <label htmlFor="cred-refresh-token">Refresh Token (optional)</label>
+                    <label htmlFor="cred-refresh-token">{t('detailRefreshToken')}{t('detailOptionalSuffix')}</label>
                     <input
                       id="cred-refresh-token"
                       type="password"
                       value={refreshTokenVal}
                       onChange={e => setRefreshTokenVal(e.target.value)}
-                      placeholder="Refresh token"
+                      placeholder={t('detailRefreshToken')}
                       data-testid="cred-refresh-token-input"
                     />
                   </div>
                   <div className="form-field">
-                    <label htmlFor="cred-client-id">Client ID (optional)</label>
+                    <label htmlFor="cred-client-id">{t('detailClientId')}{t('detailOptionalSuffix')}</label>
                     <input
                       id="cred-client-id"
                       type="text"
                       value={clientIdVal}
                       onChange={e => setClientIdVal(e.target.value)}
-                      placeholder="Client ID"
+                      placeholder={t('detailClientId')}
                       data-testid="cred-client-id-input"
                     />
                   </div>
                   <div className="form-field">
-                    <label htmlFor="cred-client-secret">Client Secret (optional)</label>
+                    <label htmlFor="cred-client-secret">{t('detailClientSecret')}{t('detailOptionalSuffix')}</label>
                     <input
                       id="cred-client-secret"
                       type="password"
                       value={clientSecretVal}
                       onChange={e => setClientSecretVal(e.target.value)}
-                      placeholder="Client secret"
+                      placeholder={t('detailClientSecretPlaceholder')}
                       data-testid="cred-client-secret-input"
                     />
                   </div>
@@ -446,29 +455,29 @@ export default function VaultDetailView() {
                 disabled={addingCred}
                 data-testid="add-credential-submit"
               >
-                {addingCred ? 'Adding…' : 'Add credential'}
+                {addingCred ? t('detailAdding') : t('detailAddCredential')}
               </button>
             </div>
           </form>
         )}
 
         {credentials.length === 0 ? (
-          <p className="empty-text">No credentials in this vault.</p>
+          <p className="empty-text">{t('detailEmptyCredentials')}</p>
         ) : (
           <div className="credential-list">
             {credentials.map(cred => (
               <div key={cred.id} className="credential-card-wrapper" data-testid={`credential-card-${cred.id}`}>
                 <div className="credential-card">
                   <div className="credential-card-info">
-                    <div className="credential-card-type">{cred.credential_type}</div>
+                    <div className="credential-card-type">{t(CRED_TYPE_LABELS[cred.credential_type])}</div>
                     <div className="credential-card-target">
-                      {cred.mcp_server_url || cred.provider || (cred.credential_type === 'byok_kek' ? 'Customer-managed KEK' : '—')}
+                      {cred.mcp_server_url || cred.provider || (cred.credential_type === 'byok_kek' ? t('detailCustomerManagedKek') : '—')}
                     </div>
                     <div className="credential-card-meta">
-                      Created {new Date(cred.created_at).toLocaleString()}
+                      {t('detailCreatedAt', { time: new Date(cred.created_at).toLocaleString(i18n.language) })}
                       {cred.updated_at !== cred.created_at &&
-                        ` · Updated ${new Date(cred.updated_at).toLocaleString()}`}
-                      {cred.archived_at && ' · Archived'}
+                        ` · ${t('detailUpdatedAt', { time: new Date(cred.updated_at).toLocaleString(i18n.language) })}`}
+                      {cred.archived_at && ` · ${t('status:archived')}`}
                     </div>
                   </div>
                   <div className="credential-card-secret" data-testid="credential-secret-mask">
@@ -485,7 +494,7 @@ export default function VaultDetailView() {
                         }
                         data-testid="cred-edit-btn"
                       >
-                        {editCredId === cred.id ? 'Cancel' : 'Edit secrets'}
+                        {editCredId === cred.id ? t('common:cancel') : t('detailEditSecrets')}
                       </button>
                     )}
                     {!cred.archived_at && (
@@ -494,7 +503,7 @@ export default function VaultDetailView() {
                         onClick={() => setArchiveCredTarget(cred)}
                         data-testid="cred-archive-btn"
                       >
-                        Archive
+                        {t('detailArchive')}
                       </button>
                     )}
                     <button
@@ -502,7 +511,7 @@ export default function VaultDetailView() {
                       onClick={() => setDeleteCredTarget(cred)}
                       data-testid="cred-delete-btn"
                     >
-                      Delete
+                      {t('common:delete')}
                     </button>
                   </div>
                 </div>
@@ -512,8 +521,8 @@ export default function VaultDetailView() {
                     {SECRET_FIELDS[cred.credential_type].map(field => (
                       <div className="edit-secrets-field" key={field.key}>
                         <label htmlFor={`edit-${cred.id}-${field.key}`}>
-                          {field.label}
-                          {field.required ? '' : ' (optional)'}
+                          {t(field.label)}
+                          {field.required ? '' : t('detailOptionalSuffix')}
                         </label>
                         <input
                           id={`edit-${cred.id}-${field.key}`}
@@ -522,13 +531,13 @@ export default function VaultDetailView() {
                           onChange={e =>
                             setEditSecrets(prev => ({ ...prev, [field.key]: e.target.value }))
                           }
-                          placeholder={field.required ? 'New value' : 'Leave empty to clear'}
+                          placeholder={field.required ? t('detailNewValuePlaceholder') : t('detailLeaveEmptyPlaceholder')}
                           data-testid={`edit-secret-${field.key}`}
                         />
                       </div>
                     ))}
                     <p className="edit-secrets-hint">
-                      Provided values replace all stored secrets for this credential.
+                      {t('detailReplaceHint')}
                     </p>
                     {editSecretsError && (
                       <div className="form-error" role="alert" data-testid="edit-secrets-error">
@@ -542,14 +551,14 @@ export default function VaultDetailView() {
                         onClick={() => handleSaveSecrets(cred)}
                         data-testid="edit-secrets-save"
                       >
-                        {savingSecrets ? 'Saving…' : 'Save secrets'}
+                        {savingSecrets ? t('common:saving') : t('detailSaveSecrets')}
                       </button>
                       <button
                         className="btn-sm-secondary"
                         onClick={() => setEditCredId(null)}
                         data-testid="edit-secrets-cancel"
                       >
-                        Cancel
+                        {t('common:cancel')}
                       </button>
                     </div>
                   </div>
@@ -562,16 +571,16 @@ export default function VaultDetailView() {
 
       <ConfirmDialog
         open={!!deleteCredTarget}
-        title="Delete Credential"
-        message="Are you sure you want to permanently delete this credential?"
+        title={t('detailDeleteCredTitle')}
+        message={t('detailDeleteCredMessage')}
         onConfirm={handleDeleteCred}
         onCancel={() => setDeleteCredTarget(null)}
       />
 
       <ConfirmDialog
         open={!!archiveCredTarget}
-        title="Archive Credential"
-        message="Are you sure you want to archive this credential? Encrypted secrets will be purged."
+        title={t('detailArchiveCredTitle')}
+        message={t('detailArchiveCredMessage')}
         onConfirm={handleArchiveCred}
         onCancel={() => setArchiveCredTarget(null)}
       />

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { Skill, SkillListResponse } from '../types';
 
@@ -24,6 +25,7 @@ export default function SkillsPicker({
   testIdPrefix = 'skills-editor',
   max = 8,
 }: SkillsPickerProps) {
+  const { t } = useTranslation('skills');
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -40,7 +42,7 @@ export default function SkillsPicker({
       })
       .catch((err: ApiError) => {
         if (cancelled) return;
-        setLoadError(err.message || 'Failed to load skill library');
+        setLoadError(err.message || t('pickerLoadFailed'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -72,14 +74,16 @@ export default function SkillsPicker({
             <span
               key={name}
               className="skill-chip"
-              title={skills.some((s) => s.name === name) ? name : `${name} (not in skill library)`}
+              title={
+                skills.some((s) => s.name === name) ? name : t('pickerNotInLibrary', { name })
+              }
             >
               {name}
               <button
                 type="button"
                 className="skill-chip-remove"
                 onClick={() => removeSkill(name)}
-                aria-label={`Remove ${name}`}
+                aria-label={t('pickerRemove', { name })}
                 data-testid={`${testIdPrefix}-remove`}
               >
                 ✕
@@ -89,23 +93,25 @@ export default function SkillsPicker({
         </div>
       )}
       {loading ? (
-        <p className="section-hint">Loading skill library…</p>
+        <p className="section-hint">{t('pickerLoading')}</p>
       ) : loadError ? (
-        <p className="section-hint">Failed to load skill library — {loadError}</p>
-      ) : skills.length === 0 ? (
         <p className="section-hint">
-          No skills in the library yet — upload bundles on the Skills page first.
+          {t('pickerLoadFailed')} — {loadError}
         </p>
+      ) : skills.length === 0 ? (
+        <p className="section-hint">{t('pickerEmpty')}</p>
       ) : (
         <div className="skill-input-row">
           <select
             value={picked}
             onChange={(e) => setPicked(e.target.value)}
             disabled={atMax}
-            aria-label="Select a skill to add"
+            aria-label={t('pickerSelectAriaLabel')}
             data-testid={`${testIdPrefix}-select`}
           >
-            <option value="">{atMax ? `Max ${max} skills selected` : 'Select a skill…'}</option>
+            <option value="">
+              {atMax ? t('pickerMaxSelected', { max }) : t('pickerSelectPlaceholder')}
+            </option>
             {options.map((s) => (
               <option key={s.name} value={s.name}>
                 {s.name}
@@ -120,11 +126,11 @@ export default function SkillsPicker({
             disabled={!picked || atMax}
             data-testid={`${testIdPrefix}-add`}
           >
-            + Add
+            {t('pickerAdd')}
           </button>
         </div>
       )}
-      {atMax && <p className="section-hint">Maximum of {max} skills per agent.</p>}
+      {atMax && <p className="section-hint">{t('pickerMaxHint', { max })}</p>}
     </div>
   );
 }

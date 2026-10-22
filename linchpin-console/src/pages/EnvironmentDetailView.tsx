@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { Environment, EnvironmentPackages, LimitedNetworking } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -8,15 +9,15 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import './EnvironmentDetailView.css';
 
 const TIER_LABELS: Record<string, string> = {
-  '1c2g': 'Small — 1 vCPU / 2 GB RAM',
-  '2c4g': 'Medium — 2 vCPU / 4 GB RAM',
-  '4c8g': 'Large — 4 vCPU / 8 GB RAM',
+  '1c2g': 'detailTier1c2g',
+  '2c4g': 'detailTier2c4g',
+  '4c8g': 'detailTier4c8g',
 };
 
 const NETWORKING_LABELS: Record<string, string> = {
-  none: 'None — no external access',
-  limited: 'Limited — allowlisted domains only',
-  unrestricted: 'Unrestricted — full access',
+  none: 'detailNetworkingNone',
+  limited: 'detailNetworkingLimited',
+  unrestricted: 'detailNetworkingUnrestricted',
 };
 
 const PACKAGE_MANAGERS: (keyof EnvironmentPackages)[] = [
@@ -29,16 +30,17 @@ const PACKAGE_MANAGERS: (keyof EnvironmentPackages)[] = [
 ];
 
 function NetworkingDetails({ networking }: { networking: Environment['config']['networking'] }) {
+  const { t } = useTranslation('environments');
   if (networking.type !== 'limited') {
-    return <dd data-testid="networking-type">{NETWORKING_LABELS[networking.type]}</dd>;
+    return <dd data-testid="networking-type">{t(NETWORKING_LABELS[networking.type])}</dd>;
   }
   const limited = networking as LimitedNetworking;
   return (
     <dd data-testid="networking-type">
-      {NETWORKING_LABELS.limited}
+      {t(NETWORKING_LABELS.limited)}
       <div className="limited-detail">
         <div className="limited-row">
-          <span className="limited-label">Allowed hosts</span>
+          <span className="limited-label">{t('detailAllowedHosts')}</span>
           {limited.allowed_hosts.length > 0 ? (
             <ul className="host-list" data-testid="allowed-hosts">
               {limited.allowed_hosts.map(host => (
@@ -48,16 +50,16 @@ function NetworkingDetails({ networking }: { networking: Environment['config']['
               ))}
             </ul>
           ) : (
-            <span className="muted-value">None</span>
+            <span className="muted-value">{t('common:none')}</span>
           )}
         </div>
         <div className="limited-row">
-          <span className="limited-label">Curated MCP domains</span>
-          <span>{limited.allow_mcp_servers ? 'Allowed' : 'Blocked'}</span>
+          <span className="limited-label">{t('detailCuratedMcpDomains')}</span>
+          <span>{limited.allow_mcp_servers ? t('detailAllowed') : t('detailBlocked')}</span>
         </div>
         <div className="limited-row">
-          <span className="limited-label">Package manager domains</span>
-          <span>{limited.allow_package_managers ? 'Allowed' : 'Blocked'}</span>
+          <span className="limited-label">{t('detailPackageManagerDomains')}</span>
+          <span>{limited.allow_package_managers ? t('detailAllowed') : t('detailBlocked')}</span>
         </div>
       </div>
     </dd>
@@ -65,9 +67,10 @@ function NetworkingDetails({ networking }: { networking: Environment['config']['
 }
 
 function PackagesList({ packages }: { packages: EnvironmentPackages }) {
+  const { t } = useTranslation('environments');
   const any = PACKAGE_MANAGERS.some(m => packages[m].length > 0);
   if (!any) {
-    return <dd data-testid="packages-list">None</dd>;
+    return <dd data-testid="packages-list">{t('common:none')}</dd>;
   }
   return (
     <dd data-testid="packages-list">
@@ -95,6 +98,7 @@ function PackagesList({ packages }: { packages: EnvironmentPackages }) {
 export default function EnvironmentDetailView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation('environments');
   const [environment, setEnvironment] = useState<Environment | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
@@ -134,7 +138,7 @@ export default function EnvironmentDetailView() {
       );
       setEnvironment(updated);
     } catch (err) {
-      setActionError((err as ApiError).message || 'Failed to archive environment');
+      setActionError((err as ApiError).message || t('detailArchiveFailed'));
     } finally {
       setArchiving(false);
     }
@@ -152,8 +156,8 @@ export default function EnvironmentDetailView() {
       const apiErr = err as ApiError;
       setActionError(
         apiErr.status === 409
-          ? 'Cannot delete: non-terminated sessions still reference this environment. Terminate them first, or archive the environment instead.'
-          : apiErr.message || 'Failed to delete environment',
+          ? t('detailDeleteConflict')
+          : apiErr.message || t('detailDeleteFailed'),
       );
       setDeleting(false);
     }
@@ -182,7 +186,7 @@ export default function EnvironmentDetailView() {
   return (
     <div className="environment-detail-view" data-testid="environment-detail-view">
       <Link to="/environments" className="back-link" data-testid="back-link">
-        ← Environments
+        ← {t('listTitle')}
       </Link>
 
       <div className="environment-detail-header">
@@ -190,7 +194,7 @@ export default function EnvironmentDetailView() {
           {environment.name}
           {isArchived && (
             <span className="archived-badge" data-testid="archived-badge">
-              Archived
+              {t('detailArchivedBadge')}
             </span>
           )}
         </h1>
@@ -200,13 +204,17 @@ export default function EnvironmentDetailView() {
           </span>
           <span className="meta-separator">·</span>
           <span data-testid="environment-created">
-            Created {new Date(environment.created_at).toLocaleString()}
+            {t('detailCreatedAt', {
+              time: new Date(environment.created_at).toLocaleString(i18n.language),
+            })}
           </span>
           {isArchived && (
             <>
               <span className="meta-separator">·</span>
               <span data-testid="environment-archived">
-                Archived {new Date(environment.archived_at as string).toLocaleString()}
+                {t('detailArchivedAt', {
+                  time: new Date(environment.archived_at as string).toLocaleString(i18n.language),
+                })}
               </span>
             </>
           )}
@@ -227,7 +235,7 @@ export default function EnvironmentDetailView() {
             onClick={() => setShowArchiveConfirm(true)}
             data-testid="archive-button"
           >
-            {archiving ? 'Archiving…' : 'Archive'}
+            {archiving ? t('detailArchiving') : t('detailArchive')}
           </button>
         )}
         <button
@@ -236,54 +244,59 @@ export default function EnvironmentDetailView() {
           onClick={() => setShowDeleteConfirm(true)}
           data-testid="delete-button"
         >
-          {deleting ? 'Deleting…' : 'Delete'}
+          {deleting ? t('common:deleting') : t('common:delete')}
         </button>
       </section>
 
       <section className="detail-section" data-testid="resources-section">
-        <h2>Resources</h2>
+        <h2>{t('detailResources')}</h2>
         <dl className="detail-grid">
-          <dt>Spec tier</dt>
+          <dt>{t('detailSpecTier')}</dt>
           <dd data-testid="resource-tier">
             <span className="tier-badge">{config.resources.tier}</span>
-            <span className="tier-label">{TIER_LABELS[config.resources.tier]}</span>
+            <span className="tier-label">
+              {TIER_LABELS[config.resources.tier] ? t(TIER_LABELS[config.resources.tier]) : ''}
+            </span>
           </dd>
         </dl>
       </section>
 
       <section className="detail-section" data-testid="networking-section">
-        <h2>Networking</h2>
+        <h2>{t('detailNetworking')}</h2>
         <dl className="detail-grid">
-          <dt>Mode</dt>
+          <dt>{t('detailMode')}</dt>
           <NetworkingDetails networking={config.networking} />
         </dl>
       </section>
 
       <section className="detail-section" data-testid="packages-section">
-        <h2>Pre-installed packages</h2>
+        <h2>{t('detailPreInstalledPackages')}</h2>
         <dl className="detail-grid">
-          <dt>Packages</dt>
+          <dt>{t('detailPackages')}</dt>
           <PackagesList packages={config.packages} />
         </dl>
       </section>
 
       <section className="detail-section" data-testid="advanced-section">
-        <h2>Advanced</h2>
+        <h2>{t('detailAdvanced')}</h2>
         <dl className="detail-grid">
-          <dt>Isolation</dt>
+          <dt>{t('detailIsolation')}</dt>
           <dd data-testid="isolation">{config.isolation}</dd>
-          <dt>Tool search</dt>
+          <dt>{t('detailToolSearch')}</dt>
           <dd data-testid="tool-search">
             {config.tool_search && config.tool_search.enabled
-              ? `Enabled — activate above ${config.tool_search.threshold} tools, max ${config.tool_search.max_results} per search`
-              : 'Disabled'}
+              ? t('detailToolSearchEnabled', {
+                  threshold: config.tool_search.threshold,
+                  maxResults: config.tool_search.max_results,
+                })
+              : t('common:disabled')}
           </dd>
-          <dt>Executor node</dt>
+          <dt>{t('detailExecutorNode')}</dt>
           <dd data-testid="executor-node">
             {config.executor_node ? (
-              <Link to="/executor-nodes" title="View executor nodes">{config.executor_node}</Link>
+              <Link to="/executor-nodes" title={t('detailViewExecutorNodes')}>{config.executor_node}</Link>
             ) : (
-              'Local (this server)'
+              t('detailLocalServer')
             )}
           </dd>
         </dl>
@@ -291,15 +304,15 @@ export default function EnvironmentDetailView() {
 
       <ConfirmDialog
         open={showArchiveConfirm}
-        title="Archive Environment"
-        message={`Archive "${environment.name}"? Archived environments cannot be used for new sessions but remain reachable for forensics and replay.`}
+        title={t('detailArchiveConfirmTitle')}
+        message={t('detailArchiveConfirmMessage', { name: environment.name })}
         onConfirm={handleArchive}
         onCancel={() => setShowArchiveConfirm(false)}
       />
       <ConfirmDialog
         open={showDeleteConfirm}
-        title="Delete Environment"
-        message={`Permanently delete "${environment.name}"? This fails while non-terminated sessions still reference it — archive instead to keep history.`}
+        title={t('detailDeleteConfirmTitle')}
+        message={t('detailDeleteConfirmMessage', { name: environment.name })}
         onConfirm={handleDelete}
         onCancel={() => setShowDeleteConfirm(false)}
       />

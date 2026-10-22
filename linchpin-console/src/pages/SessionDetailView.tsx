@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import { apiClient, ApiError } from '../api/client';
 import type {
@@ -111,6 +112,7 @@ function ResourceDetailValue({
 
 export default function SessionDetailView() {
   const { id } = useParams<{ id: string }>();
+  const { t, i18n } = useTranslation('sessions');
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
@@ -226,7 +228,7 @@ export default function SessionDetailView() {
         if (!cancelled) setFsListing(listing);
       })
       .catch((err) => {
-        if (!cancelled) setFsError((err as ApiError).message || 'Failed to list directory.');
+        if (!cancelled) setFsError((err as ApiError).message || t('detailFailedToListDirectory'));
       })
       .finally(() => {
         if (!cancelled) setFsLoading(false);
@@ -246,7 +248,7 @@ export default function SessionDetailView() {
       setSession((prev) => prev ? { ...prev, status: 'terminated' } : prev);
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to terminate session');
+      setActionError(apiErr.message || t('detailFailedToTerminate'));
     } finally {
       setTerminating(false);
     }
@@ -263,7 +265,7 @@ export default function SessionDetailView() {
       );
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to archive session');
+      setActionError(apiErr.message || t('detailFailedToArchive'));
     } finally {
       setArchiving(false);
     }
@@ -280,7 +282,7 @@ export default function SessionDetailView() {
       setSession(updated);
       setRenaming(false);
     } catch (err) {
-      setActionError((err as ApiError).message || 'Failed to rename session');
+      setActionError((err as ApiError).message || t('detailFailedToRename'));
     } finally {
       setRenameSaving(false);
     }
@@ -290,7 +292,7 @@ export default function SessionDetailView() {
     if (!session || evalSubmitting) return;
     const score = Number(evalScore);
     if (Number.isNaN(score) || score < 0 || score > 1) {
-      setEvalError('Score must be a number between 0 and 1.');
+      setEvalError(t('detailInvalidScore'));
       return;
     }
     setEvalSubmitting(true);
@@ -308,7 +310,7 @@ export default function SessionDetailView() {
       setEvalScore('');
       setEvalRationale('');
     } catch (err) {
-      setEvalError((err as ApiError).message || 'Failed to record evaluation');
+      setEvalError((err as ApiError).message || t('detailFailedToRecordEvaluation'));
     } finally {
       setEvalSubmitting(false);
     }
@@ -321,7 +323,7 @@ export default function SessionDetailView() {
       const blob = await apiClient.download(`/v1/artifacts/${artifact.id}/content`);
       downloadBlob(blob, artifact.filename);
     } catch (err) {
-      setActionError((err as ApiError).message || 'Failed to download artifact.');
+      setActionError((err as ApiError).message || t('detailFailedToDownloadArtifact'));
     } finally {
       setDownloadingId(null);
     }
@@ -337,7 +339,7 @@ export default function SessionDetailView() {
       );
       downloadBlob(blob, entry.name);
     } catch (err) {
-      setFsError((err as ApiError).message || 'Failed to download file.');
+      setFsError((err as ApiError).message || t('detailFailedToDownloadFile'));
     } finally {
       setDownloadingFs(null);
     }
@@ -370,7 +372,7 @@ export default function SessionDetailView() {
   return (
     <div className="session-detail-view" data-testid="session-detail-view">
       <Link to="/sessions" className="back-link" data-testid="back-link">
-        ← Sessions
+        ← {t('nav:sessions')}
       </Link>
 
       <div className="session-detail-header">
@@ -390,7 +392,7 @@ export default function SessionDetailView() {
                 disabled={renameSaving}
                 autoFocus
                 maxLength={200}
-                aria-label="Session title"
+                aria-label={t('detailTitleAriaLabel')}
                 data-testid="session-rename-input"
               />
               <button
@@ -399,7 +401,7 @@ export default function SessionDetailView() {
                 disabled={renameSaving || !renameValue.trim()}
                 data-testid="session-rename-save"
               >
-                {renameSaving ? 'Saving…' : 'Save'}
+                {renameSaving ? t('common:saving') : t('common:save')}
               </button>
               <button
                 type="button"
@@ -408,12 +410,12 @@ export default function SessionDetailView() {
                 disabled={renameSaving}
                 data-testid="session-rename-cancel"
               >
-                Cancel
+                {t('common:cancel')}
               </button>
             </form>
           ) : (
             <>
-              <h1 data-testid="session-title">{session.title || 'Untitled Session'}</h1>
+              <h1 data-testid="session-title">{session.title || t('detailUntitledSession')}</h1>
               <button
                 className="btn-sm-secondary session-rename-btn"
                 onClick={() => {
@@ -422,13 +424,13 @@ export default function SessionDetailView() {
                 }}
                 data-testid="session-rename-btn"
               >
-                Rename
+                {t('detailRename')}
               </button>
             </>
           )}
           <StatusBadge status={session.status} />
           {isArchived && (
-            <span className="archived-badge" data-testid="archived-badge">Archived</span>
+            <span className="archived-badge" data-testid="archived-badge">{t('status:archived')}</span>
           )}
         </div>
         <div className="session-detail-meta">
@@ -437,11 +439,11 @@ export default function SessionDetailView() {
           </span>
           <span className="meta-separator">·</span>
           <span data-testid="session-created">
-            Created {new Date(session.created_at).toLocaleString()}
+            {t('detailCreatedAt', { time: new Date(session.created_at).toLocaleString(i18n.language) })}
           </span>
           <span className="meta-separator">·</span>
           <span data-testid="session-updated">
-            Updated {new Date(session.updated_at).toLocaleString()}
+            {t('detailUpdatedAt', { time: new Date(session.updated_at).toLocaleString(i18n.language) })}
           </span>
         </div>
       </div>
@@ -455,7 +457,7 @@ export default function SessionDetailView() {
             disabled={terminating}
             data-testid="terminate-btn"
           >
-            {terminating ? 'Terminating…' : 'Terminate'}
+            {terminating ? t('detailTerminating') : t('detailTerminate')}
           </button>
         )}
         {!isArchived && (
@@ -465,7 +467,7 @@ export default function SessionDetailView() {
             disabled={archiving}
             data-testid="archive-btn"
           >
-            {archiving ? 'Archiving…' : 'Archive'}
+            {archiving ? t('detailArchiving') : t('detailArchive')}
           </button>
         )}
         {actionError && (
@@ -475,44 +477,44 @@ export default function SessionDetailView() {
 
       <ConfirmDialog
         open={showTerminateDialog}
-        title="Terminate Session"
-        message="Are you sure you want to terminate this session? This action cannot be undone."
+        title={t('detailTerminateTitle')}
+        message={t('detailTerminateMessage')}
         onConfirm={handleTerminate}
         onCancel={() => setShowTerminateDialog(false)}
       />
 
       <section className="detail-section" data-testid="session-info-section">
-        <h2>Session Info</h2>
+        <h2>{t('detailSessionInfo')}</h2>
         <dl className="detail-grid">
-          <dt>Agent</dt>
+          <dt>{t('detailFieldAgent')}</dt>
           <dd data-testid="session-agent-id">
             <Link to={`/agents/${session.agent_id}`}>{agentName ?? session.agent_id}</Link>
           </dd>
-          <dt>Environment</dt>
+          <dt>{t('detailFieldEnvironment')}</dt>
           <dd data-testid="session-environment-id">
             <Link to={`/environments/${session.environment_id}`}>{environmentName ?? session.environment_id}</Link>
           </dd>
           {session.container_id && (
             <>
-              <dt>Container</dt>
+              <dt>{t('detailFieldContainer')}</dt>
               <dd data-testid="session-container-id"><code>{session.container_id}</code></dd>
             </>
           )}
           {session.stop_reason && (
             <>
-              <dt>Stop Reason</dt>
+              <dt>{t('detailFieldStopReason')}</dt>
               <dd data-testid="session-stop-reason"><code>{session.stop_reason}</code></dd>
             </>
           )}
           {typeof session.retry_count === 'number' && session.retry_count > 0 && (
             <>
-              <dt>Retries</dt>
+              <dt>{t('detailFieldRetries')}</dt>
               <dd data-testid="session-retry-count">{session.retry_count}</dd>
             </>
           )}
           {session.parent_session_id && (
             <>
-              <dt>Parent Session</dt>
+              <dt>{t('detailFieldParentSession')}</dt>
               <dd data-testid="session-parent-id">
                 <Link to={`/sessions/${session.parent_session_id}`}>
                   {session.parent_session_id}
@@ -522,7 +524,7 @@ export default function SessionDetailView() {
           )}
           {session.deployment_id && (
             <>
-              <dt>Deployment</dt>
+              <dt>{t('detailFieldDeployment')}</dt>
               <dd data-testid="session-deployment-id">
                 <Link to={`/deployments/${session.deployment_id}`}>
                   {session.deployment_id}
@@ -532,21 +534,21 @@ export default function SessionDetailView() {
           )}
           {typeof session.events_encrypted === 'boolean' && (
             <>
-              <dt>Events Encrypted</dt>
+              <dt>{t('detailFieldEventsEncrypted')}</dt>
               <dd data-testid="session-events-encrypted">
-                {session.events_encrypted ? 'Yes' : 'No'}
+                {session.events_encrypted ? t('common:yes') : t('common:no')}
               </dd>
             </>
           )}
           {session.ttl_seconds != null && (
             <>
-              <dt>TTL</dt>
+              <dt>{t('detailFieldTtl')}</dt>
               <dd data-testid="session-ttl">{session.ttl_seconds}s</dd>
             </>
           )}
           {session.vault_ids && session.vault_ids.length > 0 && (
             <>
-              <dt>Vaults</dt>
+              <dt>{t('detailFieldVaults')}</dt>
               <dd data-testid="session-vault-ids">
                 {session.vault_ids.map(vid => (
                   <div key={vid}>
@@ -561,14 +563,14 @@ export default function SessionDetailView() {
 
       {resources.length > 0 && (
         <section className="detail-section" data-testid="session-resources-section">
-          <h2>Resource Mounts</h2>
+          <h2>{t('detailResourceMounts')}</h2>
           <table className="resources-table">
             <thead>
               <tr>
-                <th>Type</th>
-                <th>Mount Path</th>
-                <th>State</th>
-                <th>Detail</th>
+                <th>{t('common:type')}</th>
+                <th>{t('detailMountPath')}</th>
+                <th>{t('detailColumnState')}</th>
+                <th>{t('common:details')}</th>
               </tr>
             </thead>
             <tbody>
@@ -581,7 +583,7 @@ export default function SessionDetailView() {
                       className={`resource-state resource-state--${res.state}`}
                       data-testid="resource-state"
                     >
-                      {res.state}
+                      {t(`status:${res.state}`, { defaultValue: String(res.state) })}
                     </span>
                   </td>
                   <td className="resource-detail">
@@ -599,56 +601,56 @@ export default function SessionDetailView() {
       )}
 
       <section className="detail-section" data-testid="session-stats-section">
-        <h2>Stats</h2>
+        <h2>{t('detailStats')}</h2>
         <div className="stats-grid">
           <div className="stat-card" data-testid="stat-total-events">
             <span className="stat-value">{session.stats.total_events}</span>
-            <span className="stat-label">Total Events</span>
+            <span className="stat-label">{t('detailStatTotalEvents')}</span>
           </div>
           <div className="stat-card" data-testid="stat-tool-calls">
             <span className="stat-value">{session.stats.tool_calls}</span>
-            <span className="stat-label">Tool Calls</span>
+            <span className="stat-label">{t('detailStatToolCalls')}</span>
           </div>
           <div className="stat-card" data-testid="stat-model-turns">
             <span className="stat-value">{session.stats.model_turns}</span>
-            <span className="stat-label">Model Turns</span>
+            <span className="stat-label">{t('detailStatModelTurns')}</span>
           </div>
         </div>
       </section>
 
       <section className="detail-section" data-testid="session-usage-section">
-        <h2>Token Usage</h2>
+        <h2>{t('detailTokenUsage')}</h2>
         <div className="stats-grid">
           <div className="stat-card" data-testid="usage-input-tokens">
-            <span className="stat-value">{session.usage.input_tokens.toLocaleString()}</span>
-            <span className="stat-label">Input Tokens</span>
+            <span className="stat-value">{session.usage.input_tokens.toLocaleString(i18n.language)}</span>
+            <span className="stat-label">{t('detailStatInputTokens')}</span>
           </div>
           <div className="stat-card" data-testid="usage-output-tokens">
-            <span className="stat-value">{session.usage.output_tokens.toLocaleString()}</span>
-            <span className="stat-label">Output Tokens</span>
+            <span className="stat-value">{session.usage.output_tokens.toLocaleString(i18n.language)}</span>
+            <span className="stat-label">{t('detailStatOutputTokens')}</span>
           </div>
         </div>
       </section>
 
       {threads !== null && threads.length > 0 && (
         <section className="detail-section" data-testid="threads-section">
-          <h2>Threads</h2>
+          <h2>{t('detailThreads')}</h2>
           <table className="resources-table">
             <thead>
               <tr>
-                <th>Title</th>
-                <th>Status</th>
-                <th>Created</th>
+                <th>{t('detailColumnTitle')}</th>
+                <th>{t('detailColumnStatus')}</th>
+                <th>{t('common:created')}</th>
               </tr>
             </thead>
             <tbody>
-              {threads.map((t) => (
-                <tr key={t.id} data-testid="thread-row">
+              {threads.map((thread) => (
+                <tr key={thread.id} data-testid="thread-row">
                   <td>
-                    <Link to={`/sessions/${t.id}`}>{t.title || t.id}</Link>
+                    <Link to={`/sessions/${thread.id}`}>{thread.title || thread.id}</Link>
                   </td>
-                  <td><StatusBadge status={t.status} /></td>
-                  <td>{new Date(t.created_at).toLocaleString()}</td>
+                  <td><StatusBadge status={thread.status} /></td>
+                  <td>{new Date(thread.created_at).toLocaleString(i18n.language)}</td>
                 </tr>
               ))}
             </tbody>
@@ -657,18 +659,18 @@ export default function SessionDetailView() {
       )}
 
       <section className="detail-section" data-testid="artifacts-section">
-        <h2>Artifacts</h2>
+        <h2>{t('detailArtifacts')}</h2>
         {artifacts === null ? (
           <LoadingSpinner />
         ) : artifacts.length === 0 ? (
-          <p className="empty-text">No artifacts produced by this session.</p>
+          <p className="empty-text">{t('detailNoArtifacts')}</p>
         ) : (
           <table className="resources-table">
             <thead>
               <tr>
-                <th>Filename</th>
-                <th>Size</th>
-                <th>Created</th>
+                <th>{t('detailColumnFilename')}</th>
+                <th>{t('detailColumnSize')}</th>
+                <th>{t('common:created')}</th>
                 <th></th>
               </tr>
             </thead>
@@ -677,7 +679,7 @@ export default function SessionDetailView() {
                 <tr key={a.id} data-testid="artifact-row">
                   <td data-testid="artifact-filename">{a.filename}</td>
                   <td>{formatBytes(a.size_bytes)}</td>
-                  <td>{new Date(a.created_at).toLocaleString()}</td>
+                  <td>{new Date(a.created_at).toLocaleString(i18n.language)}</td>
                   <td>
                     <button
                       className="btn-download"
@@ -685,7 +687,7 @@ export default function SessionDetailView() {
                       disabled={downloadingId === a.id}
                       data-testid="artifact-download"
                     >
-                      {downloadingId === a.id ? '…' : 'Download'}
+                      {downloadingId === a.id ? '…' : t('common:download')}
                     </button>
                   </td>
                 </tr>
@@ -697,13 +699,13 @@ export default function SessionDetailView() {
 
       <section className="detail-section" data-testid="outcome-evaluations-section">
         <h2>
-          Outcome Evaluations ({evaluations?.length ?? 0})
+          {t('detailOutcomeEvaluations', { total: evaluations?.length ?? 0 })}
           <button
             className="btn-refresh"
             onClick={() => setShowEvalForm((v) => !v)}
             data-testid="evaluation-toggle-form-btn"
           >
-            {showEvalForm ? 'Cancel' : 'Record Evaluation'}
+            {showEvalForm ? t('common:cancel') : t('detailRecordEvaluation')}
           </button>
         </h2>
         {showEvalForm && (
@@ -714,7 +716,7 @@ export default function SessionDetailView() {
               </div>
             )}
             <div className="eval-form-row">
-              <label htmlFor="eval-score">Score (0–1)</label>
+              <label htmlFor="eval-score">{t('detailScoreLabel')}</label>
               <input
                 id="eval-score"
                 type="number"
@@ -728,18 +730,18 @@ export default function SessionDetailView() {
               />
             </div>
             <div className="eval-form-row">
-              <label htmlFor="eval-rationale">Rationale</label>
+              <label htmlFor="eval-rationale">{t('detailRationale')}</label>
               <textarea
                 id="eval-rationale"
                 value={evalRationale}
                 onChange={(e) => setEvalRationale(e.target.value)}
                 rows={2}
-                placeholder="Why this score?"
+                placeholder={t('detailRationalePlaceholder')}
                 data-testid="evaluation-rationale-input"
               />
             </div>
             <p className="section-hint">
-              Note: a score at or above the outcome&apos;s success threshold will auto-terminate the session.
+              {t('detailEvalHint')}
             </p>
             <button
               className="btn-primary"
@@ -747,22 +749,22 @@ export default function SessionDetailView() {
               disabled={evalSubmitting}
               data-testid="evaluation-submit-btn"
             >
-              {evalSubmitting ? 'Submitting…' : 'Submit'}
+              {evalSubmitting ? t('detailSubmitting') : t('common:submit')}
             </button>
           </div>
         )}
         {evaluations === null ? (
           <LoadingSpinner />
         ) : evaluations.length === 0 ? (
-          <p className="empty-text">No outcome evaluations recorded for this session.</p>
+          <p className="empty-text">{t('detailNoEvaluations')}</p>
         ) : (
           <table className="resources-table">
             <thead>
               <tr>
-                <th>Score</th>
-                <th>Grader</th>
-                <th>Rationale</th>
-                <th>Recorded</th>
+                <th>{t('detailColumnScore')}</th>
+                <th>{t('detailColumnGrader')}</th>
+                <th>{t('detailRationale')}</th>
+                <th>{t('detailColumnRecorded')}</th>
               </tr>
             </thead>
             <tbody>
@@ -777,7 +779,7 @@ export default function SessionDetailView() {
                   <td className="eval-rationale" data-testid="evaluation-rationale">
                     {ev.rationale || '—'}
                   </td>
-                  <td>{new Date(ev.created_at).toLocaleString()}</td>
+                  <td>{new Date(ev.created_at).toLocaleString(i18n.language)}</td>
                 </tr>
               ))}
             </tbody>
@@ -786,10 +788,10 @@ export default function SessionDetailView() {
       </section>
 
       <section className="detail-section" data-testid="filesystem-section">
-        <h2>Filesystem</h2>
+        <h2>{t('detailFilesystem')}</h2>
         {!session.container_id ? (
           <p className="empty-text">
-            Filesystem is unavailable — no sandbox container is attached to this session.
+            {t('detailFilesystemUnavailable')}
           </p>
         ) : (
           <>
@@ -814,15 +816,15 @@ export default function SessionDetailView() {
             ) : fsError ? (
               <p className="empty-text" data-testid="fs-error">{fsError}</p>
             ) : !fsListing || fsListing.entries.length === 0 ? (
-              <p className="empty-text">Directory is empty.</p>
+              <p className="empty-text">{t('detailDirectoryEmpty')}</p>
             ) : (
               <table className="resources-table">
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Size</th>
-                    <th>Modified</th>
-                    <th>Permissions</th>
+                    <th>{t('common:name')}</th>
+                    <th>{t('detailColumnSize')}</th>
+                    <th>{t('detailColumnModified')}</th>
+                    <th>{t('detailColumnPermissions')}</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -850,7 +852,7 @@ export default function SessionDetailView() {
                         )}
                       </td>
                       <td>{entry.type === 'directory' ? '—' : formatBytes(entry.size)}</td>
-                      <td>{entry.modified ? new Date(entry.modified).toLocaleString() : '—'}</td>
+                      <td>{entry.modified ? new Date(entry.modified).toLocaleString(i18n.language) : '—'}</td>
                       <td>
                         <code>{entry.permissions}</code>
                       </td>
@@ -862,7 +864,7 @@ export default function SessionDetailView() {
                             disabled={downloadingFs !== null}
                             data-testid="fs-download"
                           >
-                            {downloadingFs === (fsPath === '/' ? `/${entry.name}` : `${fsPath}/${entry.name}`) ? '…' : 'Download'}
+                            {downloadingFs === (fsPath === '/' ? `/${entry.name}` : `${fsPath}/${entry.name}`) ? '…' : t('common:download')}
                           </button>
                         )}
                       </td>
@@ -876,7 +878,7 @@ export default function SessionDetailView() {
       </section>
 
       <section className="detail-section" data-testid="event-stream-section">
-        <h2>Events</h2>
+        <h2>{t('detailEvents')}</h2>
         <EventStreamPanel sessionId={session.id} sessionStatus={session.status} />
       </section>
 

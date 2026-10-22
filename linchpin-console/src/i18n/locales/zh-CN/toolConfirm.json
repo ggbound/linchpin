@@ -1,0 +1,8 @@
+{
+  "pendingToolCall": "待确认的工具调用：",
+  "sending": "发送中…",
+  "approve": "批准",
+  "reject": "拒绝",
+  "resolved": "已处理",
+  "sendFailed": "发送确认失败"
+}

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { PostEventsRequest } from '../types';
 import './ToolConfirmationCard.css';
@@ -16,6 +17,7 @@ export default function ToolConfirmationCard({
   arguments: toolArgs,
   onResolved,
 }: ToolConfirmationCardProps) {
+  const { t } = useTranslation('toolConfirm');
   const [sending, setSending] = useState(false);
   const [resolved, setResolved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +41,7 @@ export default function ToolConfirmationCard({
       onResolved();
     } catch (err) {
       const apiErr = err as ApiError;
-      setError(apiErr.message || 'Failed to send confirmation');
+      setError(apiErr.message || t('sendFailed'));
     } finally {
       setSending(false);
     }
@@ -48,7 +50,7 @@ export default function ToolConfirmationCard({
   return (
     <div className="tool-confirmation-card" data-testid="tool-confirmation-card">
       <div className="tool-confirmation-header">
-        Pending tool call: <span className="tool-confirmation-name" data-testid="tool-name">{toolName}</span>
+        {t('pendingToolCall')} <span className="tool-confirmation-name" data-testid="tool-name">{toolName}</span>
       </div>
       <div className="tool-confirmation-args" data-testid="tool-args">
         {JSON.stringify(toolArgs, null, 2)}
@@ -66,7 +68,7 @@ export default function ToolConfirmationCard({
             disabled={sending}
             data-testid="tool-approve-btn"
           >
-            {sending ? 'Sending…' : 'Approve'}
+            {sending ? t('sending') : t('approve')}
           </button>
           <button
             className="tool-confirmation-reject"
@@ -74,13 +76,13 @@ export default function ToolConfirmationCard({
             disabled={sending}
             data-testid="tool-reject-btn"
           >
-            {sending ? 'Sending…' : 'Reject'}
+            {sending ? t('sending') : t('reject')}
           </button>
         </div>
       )}
       {resolved && (
         <div className="tool-confirmation-resolved" data-testid="tool-resolved">
-          Resolved
+          {t('resolved')}
         </div>
       )}
     </div>

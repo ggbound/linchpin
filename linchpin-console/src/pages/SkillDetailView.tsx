@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { Skill } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -16,6 +17,7 @@ function humanBytes(bytes: number): string {
 export default function SkillDetailView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation('skills');
 
   const [skill, setSkill] = useState<Skill | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,7 +53,7 @@ export default function SkillDetailView() {
       await apiClient.delete<Skill>(`/v1/skills/${skill.id}`);
       navigate('/skills');
     } catch (err) {
-      setActionError((err as ApiError).message || 'Failed to delete skill');
+      setActionError((err as ApiError).message || t('detailDeleteFailed'));
       setDeleting(false);
     }
   };
@@ -78,7 +80,7 @@ export default function SkillDetailView() {
   return (
     <div className="skill-detail-view" data-testid="skill-detail-view">
       <Link to="/skills" className="back-link" data-testid="back-link">
-        ← Skills
+        {t('detailBackToSkills')}
       </Link>
 
       <div className="skill-detail-header">
@@ -86,7 +88,7 @@ export default function SkillDetailView() {
           {skill.name}
           {isArchived && (
             <span className="archived-badge" data-testid="archived-badge">
-              Archived
+              {t('detailArchivedBadge')}
             </span>
           )}
         </h1>
@@ -96,23 +98,29 @@ export default function SkillDetailView() {
           </span>
           <span className="meta-separator">·</span>
           <span data-testid="skill-created">
-            Created {new Date(skill.created_at).toLocaleString()}
+            {t('detailCreatedAt', {
+              time: new Date(skill.created_at).toLocaleString(i18n.language),
+            })}
           </span>
           <span className="meta-separator">·</span>
           <span data-testid="skill-updated">
-            Updated {new Date(skill.updated_at).toLocaleString()}
+            {t('detailUpdatedAt', {
+              time: new Date(skill.updated_at).toLocaleString(i18n.language),
+            })}
           </span>
           {isArchived && (
             <>
               <span className="meta-separator">·</span>
               <span data-testid="skill-archived">
-                Archived {new Date(skill.archived_at as string).toLocaleString()}
+                {t('detailArchivedAt', {
+                  time: new Date(skill.archived_at as string).toLocaleString(i18n.language),
+                })}
               </span>
             </>
           )}
         </div>
         <p className="skill-detail-desc" data-testid="skill-description">
-          {skill.description || 'No description'}
+          {skill.description || t('detailNoDescription')}
         </p>
       </div>
 
@@ -129,18 +137,18 @@ export default function SkillDetailView() {
           onClick={() => setShowDeleteConfirm(true)}
           data-testid="delete-button"
         >
-          {deleting ? 'Deleting…' : 'Delete'}
+          {deleting ? t('common:deleting') : t('common:delete')}
         </button>
       </section>
 
       <section className="detail-section" data-testid="skill-bundle-section">
-        <h2>Bundle</h2>
+        <h2>{t('detailBundle')}</h2>
         <dl className="detail-grid">
-          <dt>Version</dt>
+          <dt>{t('detailFieldVersion')}</dt>
           <dd data-testid="skill-version">{skill.version || '—'}</dd>
-          <dt>Size</dt>
+          <dt>{t('detailFieldSize')}</dt>
           <dd data-testid="skill-size">{humanBytes(skill.bundle_size)}</dd>
-          <dt>SHA-256</dt>
+          <dt>{t('detailFieldSha256')}</dt>
           <dd data-testid="skill-sha256">
             <code className="skill-sha256-code">{skill.bundle_sha256}</code>
           </dd>
@@ -149,8 +157,8 @@ export default function SkillDetailView() {
 
       <ConfirmDialog
         open={showDeleteConfirm}
-        title="Delete Skill"
-        message={`Are you sure you want to delete "${skill.name}"? Agents will no longer be able to use it.`}
+        title={t('detailDeleteConfirmTitle')}
+        message={t('detailDeleteConfirmMessage', { name: skill.name })}
         onConfirm={handleDelete}
         onCancel={() => setShowDeleteConfirm(false)}
       />

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import LoadingSpinner from './LoadingSpinner';
 import './Pagination.css';
 
@@ -8,6 +9,7 @@ interface PaginationProps {
 }
 
 export default function Pagination({ hasMore, onLoadMore, loading = false }: PaginationProps) {
+  const { t } = useTranslation();
   if (!hasMore) return null;
 
   return (
@@ -18,7 +20,7 @@ export default function Pagination({ hasMore, onLoadMore, loading = false }: Pag
         disabled={loading}
         data-testid="load-more"
       >
-        {loading ? <LoadingSpinner inline /> : 'Load more'}
+        {loading ? <LoadingSpinner inline /> : t('common:loadMore')}
       </button>
     </div>
   );

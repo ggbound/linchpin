@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { Skill, SkillListResponse, SkillPreflightResponse } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -15,23 +16,11 @@ function humanBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-function uploadErrorMessage(err: unknown): string {
-  const apiErr = err as ApiError;
-  if (apiErr.status === 413) {
-    return 'Bundle exceeds the 10 MB size limit.';
-  }
-  if (apiErr.status === 422) {
-    return (
-      'Invalid skill bundle — the archive must contain a SKILL.md with valid frontmatter (name, description).'
-    );
-  }
-  return apiErr.message || 'Failed to upload skill bundle';
-}
-
 export default function SkillListView() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { t, i18n } = useTranslation('skills');
 
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,6 +40,17 @@ export default function SkillListView() {
 
   const [deleteTarget, setDeleteTarget] = useState<Skill | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const uploadErrorMessage = (err: unknown): string => {
+    const apiErr = err as ApiError;
+    if (apiErr.status === 413) {
+      return t('listBundleTooLarge');
+    }
+    if (apiErr.status === 422) {
+      return t('listBundleInvalid');
+    }
+    return apiErr.message || t('listUploadFailed');
+  };
 
   const fetchSkills = useCallback(async () => {
     setLoading(true);
@@ -76,8 +76,8 @@ export default function SkillListView() {
       const isUpdate = created.updated_at !== created.created_at;
       setUploadNotice(
         isUpdate
-          ? `Skill "${created.name}" updated — existing bundle with the same name was replaced.`
-          : `Skill "${created.name}" uploaded.`,
+          ? t('listReplaceNotice', { name: created.name })
+          : t('listUploadNotice', { name: created.name }),
       );
       setSkills(prev => {
         const idx = prev.findIndex(s => s.id === created.id);
@@ -102,9 +102,7 @@ export default function SkillListView() {
     if (fileInputRef.current) fileInputRef.current.value = '';
 
     if (file.size > SKILL_BUNDLE_MAX_BYTES) {
-      setActionError(
-        `Bundle is ${humanBytes(file.size)} — exceeds the 10 MB limit.`,
-      );
+      setActionError(t('listBundleTooLargeWithSize', { size: humanBytes(file.size) }));
       return;
     }
 
@@ -149,7 +147,7 @@ export default function SkillListView() {
       setDeleteTarget(null);
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to delete skill');
+      setActionError(apiErr.message || t('listDeleteFailed'));
       setDeleteTarget(null);
     } finally {
       setDeleting(false);
@@ -182,11 +180,8 @@ export default function SkillListView() {
     <div className="skill-list-view" data-testid="skill-list-view">
       <div className="skill-list-header">
         <div>
-          <h1>Skills</h1>
-          <p>
-            Reusable agent capabilities. Upload a bundle (zip archive containing a
-            SKILL.md) to make it available to agents.
-          </p>
+          <h1>{t('listTitle')}</h1>
+          <p>{t('listSubtitle')}</p>
         </div>
         <div className="skill-upload-area">
           <input
@@ -206,7 +201,7 @@ export default function SkillListView() {
             onClick={() => fileInputRef.current?.click()}
             data-testid="upload-skill-btn"
           >
-            {uploading ? 'Uploading…' : 'Upload skill bundle'}
+            {uploading ? t('listUploading') : t('listUploadBundle')}
           </button>
         </div>
       </div>
@@ -227,37 +222,35 @@ export default function SkillListView() {
         <input
           type="text"
           className="skill-search-input"
-          placeholder="Filter by name or description"
+          placeholder={t('listSearchPlaceholder')}
           value={query}
           onChange={e => setQuery(e.target.value)}
           data-testid="skill-search-input"
-          aria-label="Filter skills"
+          aria-label={t('listSearchAriaLabel')}
         />
       )}
 
       {skills.length === 0 ? (
         <div className="skill-empty" data-testid="skill-empty">
-          <p className="empty-text">
-            No skills installed yet. Upload a bundle to get started.
-          </p>
+          <p className="empty-text">{t('listEmpty')}</p>
         </div>
       ) : visible.length === 0 ? (
         <p className="empty-text" data-testid="skill-filter-empty">
-          No skills match your filter.
+          {t('listNoFilterResults')}
         </p>
       ) : (
         <div className="skill-table-wrapper">
           <table className="skill-table" data-testid="skill-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Version</th>
-                <th>Description</th>
-                <th>SHA-256</th>
-                <th>Size</th>
-                <th>Created</th>
-                <th>Updated</th>
-                <th>Actions</th>
+                <th>{t('common:name')}</th>
+                <th>{t('listColumnVersion')}</th>
+                <th>{t('common:description')}</th>
+                <th>{t('listColumnSha256')}</th>
+                <th>{t('listColumnSize')}</th>
+                <th>{t('common:created')}</th>
+                <th>{t('common:updated')}</th>
+                <th>{t('common:actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -275,7 +268,9 @@ export default function SkillListView() {
                 >
                   <td className="skill-name-cell">
                     {skill.name}
-                    {skill.archived_at && <span className="archived-badge">Archived</span>}
+                    {skill.archived_at && (
+                      <span className="archived-badge">{t('listArchivedBadge')}</span>
+                    )}
                   </td>
                   <td className="skill-version-cell">{skill.version || '—'}</td>
                   <td className="skill-desc-cell">{skill.description}</td>
@@ -285,8 +280,8 @@ export default function SkillListView() {
                     </code>
                   </td>
                   <td>{humanBytes(skill.bundle_size)}</td>
-                  <td>{new Date(skill.created_at).toLocaleString()}</td>
-                  <td>{new Date(skill.updated_at).toLocaleString()}</td>
+                  <td>{new Date(skill.created_at).toLocaleString(i18n.language)}</td>
+                  <td>{new Date(skill.updated_at).toLocaleString(i18n.language)}</td>
                   <td>
                     <button
                       className="btn-sm-danger"
@@ -297,7 +292,7 @@ export default function SkillListView() {
                       }}
                       data-testid="skill-delete-btn"
                     >
-                      Delete
+                      {t('common:delete')}
                     </button>
                   </td>
                 </tr>
@@ -309,10 +304,10 @@ export default function SkillListView() {
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Delete Skill"
+        title={t('listDeleteConfirmTitle')}
         message={
           deleteTarget
-            ? `Are you sure you want to delete "${deleteTarget.name}"? Agents will no longer be able to use it.`
+            ? t('listDeleteConfirmMessage', { name: deleteTarget.name })
             : ''
         }
         onConfirm={handleDelete}
@@ -321,14 +316,15 @@ export default function SkillListView() {
 
       <ConfirmDialog
         open={replaceCandidate !== null}
-        title="Replace Skill"
+        title={t('listReplaceConfirmTitle')}
         message={
           replaceCandidate
-            ? `A skill named "${replaceCandidate.pre.name}" already exists${
-                replaceCandidate.pre.replaces?.version
-                  ? ` (version ${replaceCandidate.pre.replaces.version})`
-                  : ''
-              }. Uploading this bundle will replace it. Continue?`
+            ? replaceCandidate.pre.replaces?.version
+              ? t('listReplaceConfirmMessageWithVersion', {
+                  name: replaceCandidate.pre.name,
+                  version: replaceCandidate.pre.replaces.version,
+                })
+              : t('listReplaceConfirmMessage', { name: replaceCandidate.pre.name })
             : ''
         }
         onConfirm={handleReplaceConfirm}

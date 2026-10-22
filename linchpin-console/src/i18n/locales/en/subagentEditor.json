@@ -1,0 +1,13 @@
+{
+  "nameRuleHint": "lowercase letters, digits, _ or - (max 64 chars, starts with a letter)",
+  "nameUnique": "name must be unique",
+  "agent": "Agent",
+  "selectAgent": "Select agent…",
+  "model": "model: {{model}}",
+  "environmentOptional": "Environment (optional)",
+  "inheritSessionEnvironment": "Inherit session environment",
+  "descriptionPlaceholder": "When to spawn this subagent",
+  "remove": "Remove",
+  "addSubagent": "+ Add Subagent",
+  "maxSubagents": "max {{count}} subagents"
+}

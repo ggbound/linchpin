@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { PostEventsRequest, SessionStatus } from '../types';
 import './MessageInput.css';
@@ -10,6 +11,7 @@ interface MessageInputProps {
 }
 
 export default function MessageInput({ sessionId, disabled, sessionStatus }: MessageInputProps) {
+  const { t } = useTranslation('messageInput');
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [interrupting, setInterrupting] = useState(false);
@@ -36,7 +38,7 @@ export default function MessageInput({ sessionId, disabled, sessionStatus }: Mes
       setText('');
     } catch (err) {
       const apiErr = err as ApiError;
-      setError(apiErr.message || 'Failed to send message');
+      setError(apiErr.message || t('sendFailed'));
     } finally {
       setSending(false);
     }
@@ -53,7 +55,7 @@ export default function MessageInput({ sessionId, disabled, sessionStatus }: Mes
       setText('');
     } catch (err) {
       const apiErr = err as ApiError;
-      setError(apiErr.message || 'Failed to interrupt');
+      setError(apiErr.message || t('interruptFailed'));
     } finally {
       setInterrupting(false);
     }
@@ -70,17 +72,17 @@ export default function MessageInput({ sessionId, disabled, sessionStatus }: Mes
     return (
       <div className="message-input-container" data-testid="message-input-container">
         <div className="message-input-disabled-notice" data-testid="message-input-disabled-notice">
-          This session is no longer active.
+          {t('sessionInactive')}
         </div>
         <div className="message-input-row">
           <textarea
             className="message-input-field"
             disabled
-            placeholder="Session ended"
+            placeholder={t('sessionEnded')}
             data-testid="message-input-field"
           />
           <button className="message-input-send" disabled data-testid="message-input-send">
-            Send
+            {t('send')}
           </button>
         </div>
       </div>
@@ -91,7 +93,7 @@ export default function MessageInput({ sessionId, disabled, sessionStatus }: Mes
     <div className="message-input-container" data-testid="message-input-container">
       {isRunning && (
         <div className="message-input-hint" data-testid="message-input-steer-hint">
-          Agent is running — messages are delivered as steers at the next safe point.
+          {t('steerHint')}
         </div>
       )}
       {error && (
@@ -105,7 +107,7 @@ export default function MessageInput({ sessionId, disabled, sessionStatus }: Mes
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type a message…"
+          placeholder={t('placeholder')}
           disabled={sending}
           rows={1}
           data-testid="message-input-field"
@@ -116,7 +118,7 @@ export default function MessageInput({ sessionId, disabled, sessionStatus }: Mes
           disabled={sending || !text.trim()}
           data-testid="message-input-send"
         >
-          {sending ? 'Sending…' : isRunning ? 'Steer' : 'Send'}
+          {sending ? t('sending') : isRunning ? t('steer') : t('send')}
         </button>
         {isRunning && (
           <button
@@ -125,7 +127,7 @@ export default function MessageInput({ sessionId, disabled, sessionStatus }: Mes
             disabled={interrupting}
             data-testid="message-input-interrupt"
           >
-            {interrupting ? 'Interrupting…' : 'Interrupt'}
+            {interrupting ? t('interrupting') : t('interrupt')}
           </button>
         )}
       </div>

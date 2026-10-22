@@ -1,5 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError, extractValidationErrors, FieldValidationError } from '../api/client';
 import type { Agent, CreateAgentRequest, ModelConfig, MCPServerConfig, SubagentConfig } from '../types';
 import SubagentEditor from '../components/SubagentEditor';
@@ -34,6 +35,7 @@ interface MCPEntry {
 }
 
 export default function AgentCreateForm() {
+  const { t } = useTranslation('agents');
   const navigate = useNavigate();
 
   // Basic info
@@ -185,7 +187,7 @@ export default function AgentCreateForm() {
     } catch (err) {
       const apiErr = err as ApiError;
       setValidationErrors(extractValidationErrors(err));
-      setError(apiErr.message || 'Failed to create agent');
+      setError(apiErr.message || t('createFailed'));
       setSubmitting(false);
     }
   };
@@ -236,16 +238,14 @@ export default function AgentCreateForm() {
   return (
     <div className="agent-create-form">
       <Link to="/agents" className="back-link">
-        ← Agents
+        {t('createBackToAgents')}
       </Link>
-      <h1>Create Agent</h1>
+      <h1>{t('createTitle')}</h1>
 
       {error && (
         <div className="form-error" data-testid="form-error">
           <p>
-            {validationErrors.length > 0
-              ? 'Request validation failed — fix the highlighted fields below.'
-              : error}
+            {validationErrors.length > 0 ? t('createValidationError') : error}
           </p>
           {unmappedErrors.length > 0 && (
             <ul className="form-error-list">
@@ -262,27 +262,27 @@ export default function AgentCreateForm() {
       <form onSubmit={handleSubmit}>
         {/* Basic Info */}
         <section className="form-section">
-          <h2>Basic Info</h2>
+          <h2>{t('createBasicInfo')}</h2>
           <div className="form-field">
-            <label htmlFor="agent-name">Name</label>
+            <label htmlFor="agent-name">{t('common:name')}</label>
             <input
               id="agent-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              placeholder="My Agent"
+              placeholder={t('createNamePlaceholder')}
             />
             {renderFieldErrors('name')}
           </div>
           <div className="form-field">
-            <label htmlFor="agent-description">Description</label>
+            <label htmlFor="agent-description">{t('common:description')}</label>
             <input
               id="agent-description"
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="What this agent does"
+              placeholder={t('createDescriptionPlaceholder')}
             />
             {renderFieldErrors('description')}
           </div>
@@ -290,7 +290,7 @@ export default function AgentCreateForm() {
 
         {/* Model Configuration */}
         <section className="form-section">
-          <h2>Model Configuration</h2>
+          <h2>{t('createModelConfig')}</h2>
           {modelOtherErrors.length > 0 && (
             <ul className="field-error" data-testid="field-error-model">
               {modelOtherErrors.map((m, i) => (
@@ -299,7 +299,7 @@ export default function AgentCreateForm() {
             </ul>
           )}
           <div className="form-field">
-            <label htmlFor="model-provider">Provider</label>
+            <label htmlFor="model-provider">{t('createProvider')}</label>
             <select
               id="model-provider"
               value={provider}
@@ -310,7 +310,7 @@ export default function AgentCreateForm() {
             </select>
           </div>
           <div className="form-field">
-            <label htmlFor="model-id">Model ID</label>
+            <label htmlFor="model-id">{t('createModelId')}</label>
             <input
               id="model-id"
               type="text"
@@ -323,7 +323,7 @@ export default function AgentCreateForm() {
           </div>
           {provider === 'ollama' && (
             <div className="form-field">
-              <label htmlFor="base-url">Base URL</label>
+              <label htmlFor="base-url">{t('createBaseUrl')}</label>
               <input
                 id="base-url"
                 type="text"
@@ -338,14 +338,14 @@ export default function AgentCreateForm() {
 
         {/* System Prompt */}
         <section className="form-section">
-          <h2>System Prompt</h2>
+          <h2>{t('createSystemPrompt')}</h2>
           <div className="form-field">
-            <label htmlFor="system-prompt">Prompt</label>
+            <label htmlFor="system-prompt">{t('createPromptLabel')}</label>
             <textarea
               id="system-prompt"
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="You are a helpful assistant..."
+              placeholder={t('createPromptPlaceholder')}
             />
             {renderFieldErrors('system')}
           </div>
@@ -353,41 +353,38 @@ export default function AgentCreateForm() {
 
         {/* Skills */}
         <section className="form-section">
-          <h2>Skills</h2>
-          <p className="section-hint">
-            Pick skill bundles from the library to install on this agent (upload bundles on the
-            Skills page). Max {MAX_SKILLS}.
-          </p>
+          <h2>{t('createSkills')}</h2>
+          <p className="section-hint">{t('createSkillsHint', { max: MAX_SKILLS })}</p>
           {renderFieldErrors('skills')}
           <SkillsPicker value={skills} onChange={setSkills} testIdPrefix="skills-editor" max={MAX_SKILLS} />
         </section>
 
         {/* Tools */}
         <section className="form-section">
-          <h2>Tools</h2>
+          <h2>{t('createTools')}</h2>
           {renderFieldErrors('tools')}
           <div className="dynamic-entries">
             {tools.map((tool, idx) => (
               <div key={idx} className="dynamic-entry">
                 <div className="entry-fields">
                   <div className="form-field">
-                    <label>Type</label>
+                    <label>{t('common:type')}</label>
                     <select
                       value={tool.type}
                       onChange={(e) => updateTool(idx, 'type', e.target.value)}
                     >
-                      <option value="builtin">Builtin</option>
-                      <option value="custom">Custom</option>
+                      <option value="builtin">{t('createToolBuiltin')}</option>
+                      <option value="custom">{t('createToolCustom')}</option>
                     </select>
                   </div>
                   <div className="form-field">
-                    <label>Name</label>
+                    <label>{t('common:name')}</label>
                     {tool.type === 'builtin' ? (
                       <select
                         value={tool.name}
                         onChange={(e) => updateTool(idx, 'name', e.target.value)}
                       >
-                        <option value="">Select tool…</option>
+                        <option value="">{t('createSelectTool')}</option>
                         {BUILTIN_TOOL_NAMES.map((n) => (
                           <option key={n} value={n}>
                             {n}
@@ -399,51 +396,51 @@ export default function AgentCreateForm() {
                         type="text"
                         value={tool.name}
                         onChange={(e) => updateTool(idx, 'name', e.target.value)}
-                        placeholder="Tool name"
+                        placeholder={t('createToolNamePlaceholder')}
                       />
                     )}
                   </div>
                   <div className="form-field">
-                    <label>Permission</label>
+                    <label>{t('createPermission')}</label>
                     <select
                       value={tool.permission_policy}
                       onChange={(e) => updateTool(idx, 'permission_policy', e.target.value)}
                     >
-                      <option value="always_allow">Always Allow</option>
-                      <option value="always_ask">Always Ask</option>
+                      <option value="always_allow">{t('createPermAlwaysAllow')}</option>
+                      <option value="always_ask">{t('createPermAlwaysAsk')}</option>
                     </select>
                   </div>
                 </div>
                 <button type="button" className="btn-remove" onClick={() => removeTool(idx)}>
-                  Remove
+                  {t('createRemove')}
                 </button>
               </div>
             ))}
           </div>
           <button type="button" className="btn-add" onClick={addTool}>
-            + Add Tool
+            {t('createAddTool')}
           </button>
         </section>
 
         {/* MCP Servers */}
         <section className="form-section">
-          <h2>MCP Servers</h2>
+          <h2>{t('createMcpServers')}</h2>
           {renderFieldErrors('mcp_servers')}
           <div className="dynamic-entries">
             {mcpServers.map((server, idx) => (
               <div key={idx} className="dynamic-entry">
                 <div className="entry-fields">
                   <div className="form-field">
-                    <label>Name</label>
+                    <label>{t('common:name')}</label>
                     <input
                       type="text"
                       value={server.name}
                       onChange={(e) => updateMcpServer(idx, 'name', e.target.value)}
-                      placeholder="Server name"
+                      placeholder={t('createServerNamePlaceholder')}
                     />
                   </div>
                   <div className="form-field">
-                    <label>Command</label>
+                    <label>{t('createCommand')}</label>
                     <input
                       type="text"
                       value={server.command}
@@ -452,7 +449,7 @@ export default function AgentCreateForm() {
                     />
                   </div>
                   <div className="form-field full-width">
-                    <label>Args (comma-separated)</label>
+                    <label>{t('createArgs')}</label>
                     <input
                       type="text"
                       value={server.args}
@@ -461,7 +458,7 @@ export default function AgentCreateForm() {
                     />
                   </div>
                   <div className="form-field full-width">
-                    <label>Environment Variables</label>
+                    <label>{t('createEnvVars')}</label>
                     <div className="env-pairs">
                       {server.env.map((envPair, ei) => (
                         <div key={ei} className="env-pair">
@@ -487,28 +484,26 @@ export default function AgentCreateForm() {
                         </div>
                       ))}
                       <button type="button" className="btn-add-sm" onClick={() => addEnvPair(idx)}>
-                        + Add env var
+                        {t('createAddEnvVar')}
                       </button>
                     </div>
                   </div>
                 </div>
                 <button type="button" className="btn-remove" onClick={() => removeMcpServer(idx)}>
-                  Remove
+                  {t('createRemove')}
                 </button>
               </div>
             ))}
           </div>
           <button type="button" className="btn-add" onClick={addMcpServer}>
-            + Add MCP Server
+            {t('createAddMcpServer')}
           </button>
         </section>
 
         {/* Multi-Agent */}
         <section className="form-section">
-          <h2>Multi-Agent Subagents</h2>
-          <p className="section-hint">
-            Sub-agents this agent can spawn via the multi-agent tool (max 16, unique names).
-          </p>
+          <h2>{t('createSubagentsTitle')}</h2>
+          <p className="section-hint">{t('createSubagentsHint')}</p>
           {renderFieldErrors('multi_agents')}
           <SubagentEditor value={subagents} onChange={setSubagents} />
         </section>
@@ -516,7 +511,7 @@ export default function AgentCreateForm() {
         {/* Submit */}
         <div className="form-actions">
           <button type="submit" className="btn-submit" disabled={submitting}>
-            {submitting ? 'Creating…' : 'Create Agent'}
+            {submitting ? t('common:creating') : t('createSubmitButton')}
           </button>
         </div>
       </form>

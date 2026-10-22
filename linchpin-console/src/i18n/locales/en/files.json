@@ -1,0 +1,22 @@
+{
+  "title": "Files",
+  "subtitle": "Unscoped files for this project. Uploaded files are available to mount into sessions; only agent-produced deliverables are downloadable.",
+  "uploadFile": "Upload file",
+  "uploading": "Uploading…",
+  "fileTooLarge": "File is too large — it exceeds the server upload size cap.",
+  "uploadFailed": "Failed to upload file",
+  "downloadFailed": "Failed to download file",
+  "deleteFailed": "Failed to delete file",
+  "moreNote": "Showing the first 100 files.",
+  "empty": "No files yet. Upload one to make it available for session mounts.",
+  "colFilename": "Filename",
+  "colContentType": "Content Type",
+  "colSize": "Size",
+  "colSource": "Source",
+  "sourceUpload": "Upload",
+  "sourceDeliverable": "Deliverable",
+  "sourceArtifact": "Artifact",
+  "colDownloadable": "Downloadable",
+  "deleteTitle": "Delete file",
+  "deleteMessage": "Delete \"{{filename}}\"? This permanently removes the file and its stored bytes. Files currently mounted in a session cannot be deleted."
+}

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { apiClient, ApiError } from '../api/client';
 import type { FileRecord, PaginatedResponse } from '../types';
@@ -14,6 +15,7 @@ function formatBytes(bytes: number): string {
 }
 
 export default function ArtifactsView() {
+  const { t, i18n } = useTranslation('artifacts');
   const [artifacts, setArtifacts] = useState<FileRecord[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -49,7 +51,7 @@ export default function ArtifactsView() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setActionError((err as ApiError).message || 'Failed to download artifact');
+      setActionError((err as ApiError).message || t('downloadFailed'));
     } finally {
       setDownloadingId(null);
     }
@@ -78,10 +80,9 @@ export default function ArtifactsView() {
     <div className="artifacts-view" data-testid="artifacts-view">
       <div className="artifacts-header">
         <div>
-          <h1>Artifacts</h1>
+          <h1>{t('title')}</h1>
           <p>
-            Files exported by agents from session sandboxes via the save_artifact tool.
-            Click a session to see the run that produced it.
+            {t('subtitle')}
           </p>
         </div>
       </div>
@@ -94,7 +95,7 @@ export default function ArtifactsView() {
 
       {hasMore && (
         <div className="artifacts-more-note" data-testid="artifacts-more-note">
-          Showing the first 100 artifacts.
+          {t('moreNote')}
         </div>
       )}
 
@@ -102,19 +103,19 @@ export default function ArtifactsView() {
         <table className="artifacts-table" data-testid="artifacts-table">
           <thead>
             <tr>
-              <th>Filename</th>
-              <th>Content Type</th>
-              <th>Size</th>
-              <th>Session</th>
-              <th>Created</th>
-              <th>Actions</th>
+              <th>{t('colFilename')}</th>
+              <th>{t('colContentType')}</th>
+              <th>{t('colSize')}</th>
+              <th>{t('colSession')}</th>
+              <th>{t('common:created')}</th>
+              <th>{t('common:actions')}</th>
             </tr>
           </thead>
           <tbody>
             {artifacts.length === 0 ? (
               <tr>
                 <td colSpan={6} className="empty-row" data-testid="artifacts-empty">
-                  No artifacts yet. Agents export artifacts from sessions with the save_artifact tool.
+                  {t('empty')}
                 </td>
               </tr>
             ) : (
@@ -134,7 +135,7 @@ export default function ArtifactsView() {
                       <span className="artifacts-session-none">—</span>
                     )}
                   </td>
-                  <td>{new Date(artifact.created_at).toLocaleString()}</td>
+                  <td>{new Date(artifact.created_at).toLocaleString(i18n.language)}</td>
                   <td>
                     {artifact.downloadable && (
                       <button
@@ -143,7 +144,7 @@ export default function ArtifactsView() {
                         onClick={() => handleDownload(artifact)}
                         data-testid="artifacts-download-btn"
                       >
-                        {downloadingId === artifact.id ? 'Downloading…' : 'Download'}
+                        {downloadingId === artifact.id ? t('downloading') : t('common:download')}
                       </button>
                     )}
                   </td>

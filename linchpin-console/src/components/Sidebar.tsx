@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { clearApiKey } from '../api/client';
+import { setAppLanguage } from '../i18n';
 import './Sidebar.css';
 
 type HealthStatus = 'checking' | 'healthy' | 'unhealthy';
@@ -11,6 +13,7 @@ const API_BASE =
 
 export default function Sidebar() {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation();
   const [health, setHealth] = useState<HealthStatus>('checking');
 
   const checkHealth = useCallback(async () => {
@@ -32,6 +35,10 @@ export default function Sidebar() {
     clearApiKey();
     navigate('/', { replace: true });
     window.location.reload();
+  };
+
+  const handleChangeLanguage = (lng: string) => {
+    setAppLanguage(lng === 'en' ? 'en' : 'zh-CN');
   };
 
   return (
@@ -59,7 +66,7 @@ export default function Sidebar() {
             <rect x="14" y="12" width="7" height="9" />
             <rect x="3" y="16" width="7" height="5" />
           </svg>
-          Overview
+          {t('nav:overview')}
         </NavLink>
 
         <NavLink
@@ -72,7 +79,7 @@ export default function Sidebar() {
             <circle cx="12" cy="12" r="3" />
             <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83" />
           </svg>
-          Agents
+          {t('nav:agents')}
         </NavLink>
 
         <NavLink
@@ -84,7 +91,7 @@ export default function Sidebar() {
           <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
-          Sessions
+          {t('nav:sessions')}
         </NavLink>
 
         <NavLink
@@ -97,7 +104,7 @@ export default function Sidebar() {
             <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
             <polyline points="13 2 13 9 20 9" />
           </svg>
-          Files
+          {t('nav:files')}
         </NavLink>
 
         <NavLink
@@ -112,7 +119,7 @@ export default function Sidebar() {
             <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
             <line x1="12" y1="22.08" x2="12" y2="12" />
           </svg>
-          Artifacts
+          {t('nav:artifacts')}
         </NavLink>
 
         <NavLink
@@ -127,7 +134,7 @@ export default function Sidebar() {
             <line x1="6" y1="6" x2="6.01" y2="6" />
             <line x1="6" y1="18" x2="6.01" y2="18" />
           </svg>
-          Environments
+          {t('nav:environments')}
         </NavLink>
 
         <NavLink
@@ -140,7 +147,7 @@ export default function Sidebar() {
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
             <path d="M7 11V7a5 5 0 0 1 10 0v4" />
           </svg>
-          Credential Vaults
+          {t('nav:vaults')}
         </NavLink>
 
         <NavLink
@@ -154,7 +161,7 @@ export default function Sidebar() {
             <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
             <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
           </svg>
-          Memory Stores
+          {t('nav:memoryStores')}
         </NavLink>
 
         <NavLink
@@ -166,7 +173,7 @@ export default function Sidebar() {
           <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
           </svg>
-          Dreams
+          {t('nav:dreams')}
         </NavLink>
 
         <NavLink
@@ -179,7 +186,7 @@ export default function Sidebar() {
             <circle cx="12" cy="12" r="10" />
             <polyline points="12 6 12 12 16 14" />
           </svg>
-          Deployments
+          {t('nav:deployments')}
         </NavLink>
 
         <NavLink
@@ -191,7 +198,7 @@ export default function Sidebar() {
           <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
           </svg>
-          Webhooks
+          {t('nav:webhooks')}
         </NavLink>
 
         <NavLink
@@ -205,7 +212,7 @@ export default function Sidebar() {
             <polyline points="2 17 12 22 22 17" />
             <polyline points="2 12 12 17 22 12" />
           </svg>
-          Skills
+          {t('nav:skills')}
         </NavLink>
 
         <NavLink
@@ -226,7 +233,7 @@ export default function Sidebar() {
             <line x1="1" y1="9" x2="4" y2="9" />
             <line x1="1" y1="14" x2="4" y2="14" />
           </svg>
-          Executor Nodes
+          {t('nav:executorNodes')}
         </NavLink>
 
         <NavLink
@@ -238,7 +245,7 @@ export default function Sidebar() {
           <svg className="sidebar-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
           </svg>
-          API Keys
+          {t('nav:apiKeys')}
         </NavLink>
 
         <NavLink
@@ -254,7 +261,7 @@ export default function Sidebar() {
             <line x1="16" y1="17" x2="8" y2="17" />
             <polyline points="10 9 9 10 8 9" />
           </svg>
-          Audit
+          {t('nav:audit')}
         </NavLink>
 
         <NavLink
@@ -268,15 +275,30 @@ export default function Sidebar() {
             <line x1="12" y1="20" x2="12" y2="4" />
             <line x1="6" y1="20" x2="6" y2="14" />
           </svg>
-          Usage
+          {t('nav:usage')}
         </NavLink>
       </nav>
 
       <div className="sidebar-footer">
+        <div className="sidebar-lang">
+          <label className="sidebar-lang-label" htmlFor="sidebar-lang-select">
+            {t('nav:language')}
+          </label>
+          <select
+            id="sidebar-lang-select"
+            className="sidebar-lang-select"
+            data-testid="language-switcher"
+            value={i18n.language.startsWith('zh') ? 'zh-CN' : 'en'}
+            onChange={(e) => handleChangeLanguage(e.target.value)}
+          >
+            <option value="zh-CN">简体中文</option>
+            <option value="en">English</option>
+          </select>
+        </div>
         <div className="sidebar-health" data-testid="health-indicator">
           <span className={`sidebar-health-dot ${health}`} />
           <span>
-            API {health === 'checking' ? 'checking…' : health === 'healthy' ? 'connected' : 'unreachable'}
+            {health === 'checking' ? t('nav:apiChecking') : health === 'healthy' ? t('nav:apiConnected') : t('nav:apiUnreachable')}
           </span>
         </div>
         <button
@@ -284,7 +306,7 @@ export default function Sidebar() {
           onClick={handleClearKey}
           data-testid="clear-api-key"
         >
-          Clear API key
+          {t('nav:clearApiKey')}
         </button>
       </div>
     </aside>

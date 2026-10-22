@@ -1,0 +1,13 @@
+{
+  "sessionInactive": "This session is no longer active.",
+  "sessionEnded": "Session ended",
+  "steerHint": "Agent is running — messages are delivered as steers at the next safe point.",
+  "placeholder": "Type a message…",
+  "send": "Send",
+  "sending": "Sending…",
+  "steer": "Steer",
+  "interrupt": "Interrupt",
+  "interrupting": "Interrupting…",
+  "sendFailed": "Failed to send message",
+  "interruptFailed": "Failed to interrupt"
+}

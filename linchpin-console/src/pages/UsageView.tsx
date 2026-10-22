@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { apiClient, ApiError } from '../api/client';
+import { useTranslation } from 'react-i18next';
 import type { UsageBucket, UsageResponse } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
@@ -13,25 +14,25 @@ type TokenField =
   | 'cache_creation_input_tokens'
   | 'cache_read_input_tokens';
 
-const SEGMENTS: Array<{ key: TokenField; label: string; className: string }> = [
-  { key: 'input_tokens', label: 'Input', className: 'usage-seg-input' },
-  { key: 'output_tokens', label: 'Output', className: 'usage-seg-output' },
+const SEGMENTS: Array<{ key: TokenField; labelKey: string; className: string }> = [
+  { key: 'input_tokens', labelKey: 'input', className: 'usage-seg-input' },
+  { key: 'output_tokens', labelKey: 'output', className: 'usage-seg-output' },
   {
     key: 'cache_creation_input_tokens',
-    label: 'Cache write',
+    labelKey: 'cacheWrite',
     className: 'usage-seg-cache-write',
   },
   {
     key: 'cache_read_input_tokens',
-    label: 'Cache read',
+    labelKey: 'cacheRead',
     className: 'usage-seg-cache-read',
   },
 ];
 
 const RANGES = [
-  { label: '7D', days: 7 },
-  { label: '30D', days: 30 },
-  { label: '90D', days: 90 },
+  { labelKey: 'range7D', days: 7 },
+  { labelKey: 'range30D', days: 30 },
+  { labelKey: 'range90D', days: 90 },
 ] as const;
 
 function bucketTotal(bucket: UsageBucket): number {
@@ -70,6 +71,7 @@ function truncate(text: string, max: number): string {
 }
 
 function DayChart({ buckets }: { buckets: UsageBucket[] }) {
+  const { t } = useTranslation('usage');
   const WIDTH = 840;
   const HEIGHT = 280;
   const PAD = { top: 12, right: 12, bottom: 28, left: 56 };
@@ -85,7 +87,7 @@ function DayChart({ buckets }: { buckets: UsageBucket[] }) {
       className="usage-chart"
       viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
       role="img"
-      aria-label="Token usage by day"
+      aria-label={t('chartByDay')}
       data-testid="usage-chart"
     >
       {[0, 0.25, 0.5, 0.75, 1].map(f => {
@@ -123,7 +125,7 @@ function DayChart({ buckets }: { buckets: UsageBucket[] }) {
                   height={Math.max(h, 0)}
                   className={seg.className}
                 >
-                  <title>{`${b.bucket} ${seg.label}: ${b[seg.key]}`}</title>
+                  <title>{`${b.bucket} ${t(seg.labelKey)}: ${b[seg.key]}`}</title>
                 </rect>
               ) : null;
             })}
@@ -145,6 +147,7 @@ function DayChart({ buckets }: { buckets: UsageBucket[] }) {
 }
 
 function ProjectChart({ buckets }: { buckets: UsageBucket[] }) {
+  const { t } = useTranslation('usage');
   const WIDTH = 840;
   const LABEL_W = 150;
   const VALUE_W = 70;
@@ -159,13 +162,13 @@ function ProjectChart({ buckets }: { buckets: UsageBucket[] }) {
       className="usage-chart"
       viewBox={`0 0 ${WIDTH} ${height}`}
       role="img"
-      aria-label="Token usage by project"
+      aria-label={t('chartByProject')}
       data-testid="usage-chart"
     >
       {buckets.map((b, i) => {
         const y = i * (ROW_H + GAP) + 4;
-        const t = bucketTotal(b);
-        const w = max > 0 ? (t / max) * trackW : 0;
+        const total = bucketTotal(b);
+        const w = max > 0 ? (total / max) * trackW : 0;
         let acc = 0;
         return (
           <g key={b.bucket}>
@@ -173,7 +176,7 @@ function ProjectChart({ buckets }: { buckets: UsageBucket[] }) {
               {truncate(b.bucket, 20)}
             </text>
             {SEGMENTS.map(seg => {
-              const segW = t > 0 ? (b[seg.key] / t) * w : 0;
+              const segW = total > 0 ? (b[seg.key] / total) * w : 0;
               const x = LABEL_W + acc;
               acc += segW;
               return segW > 0 ? (
@@ -185,7 +188,7 @@ function ProjectChart({ buckets }: { buckets: UsageBucket[] }) {
                   height={ROW_H}
                   className={seg.className}
                 >
-                  <title>{`${b.bucket} ${seg.label}: ${b[seg.key]}`}</title>
+                  <title>{`${b.bucket} ${t(seg.labelKey)}: ${b[seg.key]}`}</title>
                 </rect>
               ) : null;
             })}
@@ -195,7 +198,7 @@ function ProjectChart({ buckets }: { buckets: UsageBucket[] }) {
               className="usage-axis-value"
               textAnchor="end"
             >
-              {formatTokens(t)}
+              {formatTokens(total)}
             </text>
           </g>
         );
@@ -205,6 +208,7 @@ function ProjectChart({ buckets }: { buckets: UsageBucket[] }) {
 }
 
 export default function UsageView() {
+  const { t } = useTranslation('usage');
   const [groupBy, setGroupBy] = useState<GroupBy>('day');
   const [fromDate, setFromDate] = useState(() => isoDaysAgo(30));
   const [toDate, setToDate] = useState(() => isoDaysAgo(0));
@@ -257,8 +261,8 @@ export default function UsageView() {
   return (
     <div className="usage-view" data-testid="usage-view">
       <div className="usage-header">
-        <h1>Usage</h1>
-        <p>Token consumption across sessions.</p>
+        <h1>{t('title')}</h1>
+        <p>{t('subtitle')}</p>
       </div>
 
       <div className="usage-toolbar">
@@ -271,7 +275,7 @@ export default function UsageView() {
               data-testid={`usage-range-${r.days}`}
               onClick={() => handleRange(r.days)}
             >
-              {r.label}
+              {t(r.labelKey)}
             </button>
           ))}
         </div>
@@ -283,7 +287,7 @@ export default function UsageView() {
             value={fromDate}
             max={toDate}
             onChange={e => setFromDate(e.target.value)}
-            aria-label="From date"
+            aria-label={t('fromDate')}
             data-testid="usage-from"
           />
           <span className="usage-date-sep">–</span>
@@ -293,19 +297,19 @@ export default function UsageView() {
             value={toDate}
             min={fromDate}
             onChange={e => setToDate(e.target.value)}
-            aria-label="To date"
+            aria-label={t('toDate')}
             data-testid="usage-to"
           />
         </div>
 
-        <div className="usage-group-switch" role="group" aria-label="Group by">
+        <div className="usage-group-switch" role="group" aria-label={t('groupBy')}>
           <button
             type="button"
             className={`usage-group-btn${groupBy === 'day' ? ' active' : ''}`}
             data-testid="usage-group-day"
             onClick={() => setGroupBy('day')}
           >
-            Day
+            {t('groupDay')}
           </button>
           <button
             type="button"
@@ -313,7 +317,7 @@ export default function UsageView() {
             data-testid="usage-group-project"
             onClick={() => setGroupBy('project')}
           >
-            Project
+            {t('groupProject')}
           </button>
         </div>
       </div>
@@ -329,7 +333,7 @@ export default function UsageView() {
             }}
             data-testid="usage-inline-retry"
           >
-            Retry
+            {t('common:retry')}
           </button>
         </div>
       )}
@@ -337,31 +341,31 @@ export default function UsageView() {
       {total && (
         <div className="usage-kpis" data-testid="usage-kpis">
           <div className="usage-kpi-card usage-kpi-sessions">
-            <span className="usage-kpi-label">Sessions</span>
+            <span className="usage-kpi-label">{t('sessions')}</span>
             <span className="usage-kpi-value" data-testid="usage-kpi-sessions">
               {total.sessions}
             </span>
           </div>
           <div className="usage-kpi-card usage-kpi-input">
-            <span className="usage-kpi-label">Input tokens</span>
+            <span className="usage-kpi-label">{t('inputTokens')}</span>
             <span className="usage-kpi-value" data-testid="usage-kpi-input">
               {formatTokens(total.input_tokens)}
             </span>
           </div>
           <div className="usage-kpi-card usage-kpi-output">
-            <span className="usage-kpi-label">Output tokens</span>
+            <span className="usage-kpi-label">{t('outputTokens')}</span>
             <span className="usage-kpi-value" data-testid="usage-kpi-output">
               {formatTokens(total.output_tokens)}
             </span>
           </div>
           <div className="usage-kpi-card usage-kpi-cache-write">
-            <span className="usage-kpi-label">Cache write</span>
+            <span className="usage-kpi-label">{t('cacheWrite')}</span>
             <span className="usage-kpi-value" data-testid="usage-kpi-cache-write">
               {formatTokens(total.cache_creation_input_tokens)}
             </span>
           </div>
           <div className="usage-kpi-card usage-kpi-cache-read">
-            <span className="usage-kpi-label">Cache read</span>
+            <span className="usage-kpi-label">{t('cacheRead')}</span>
             <span className="usage-kpi-value" data-testid="usage-kpi-cache-read">
               {formatTokens(total.cache_read_input_tokens)}
             </span>
@@ -372,20 +376,20 @@ export default function UsageView() {
       <div className="usage-card">
         <div className="usage-card-head">
           <span className="usage-card-title">
-            {groupBy === 'day' ? 'Tokens by day' : 'Tokens by project'}
+            {groupBy === 'day' ? t('tokensByDay') : t('tokensByProject')}
           </span>
           <div className="usage-legend">
             {SEGMENTS.map(seg => (
               <span key={seg.key} className="usage-legend-item">
                 <span className={`usage-legend-swatch ${seg.className}`} />
-                {seg.label}
+                {t(seg.labelKey)}
               </span>
             ))}
           </div>
         </div>
         {buckets.length === 0 ? (
           <div className="usage-empty" data-testid="usage-empty">
-            No usage recorded for this period.
+            {t('empty')}
           </div>
         ) : groupBy === 'day' ? (
           <DayChart buckets={buckets} />
@@ -397,26 +401,26 @@ export default function UsageView() {
       <div className="usage-card">
         <div className="usage-card-head">
           <span className="usage-card-title">
-            {groupBy === 'day' ? 'Daily breakdown' : 'Project breakdown'}
+            {groupBy === 'day' ? t('dailyBreakdown') : t('projectBreakdown')}
           </span>
         </div>
         <div className="usage-table-wrapper">
           <table className="usage-table" data-testid="usage-table">
             <thead>
               <tr>
-                <th>{groupBy === 'day' ? 'Date' : 'Project'}</th>
-                <th>Sessions</th>
-                <th>Input</th>
-                <th>Output</th>
-                <th>Cache write</th>
-                <th>Cache read</th>
+                <th>{groupBy === 'day' ? t('date') : t('project')}</th>
+                <th>{t('sessions')}</th>
+                <th>{t('input')}</th>
+                <th>{t('output')}</th>
+                <th>{t('cacheWrite')}</th>
+                <th>{t('cacheRead')}</th>
               </tr>
             </thead>
             <tbody>
               {buckets.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="usage-empty-cell">
-                    No usage recorded for this period.
+                    {t('empty')}
                   </td>
                 </tr>
               ) : (

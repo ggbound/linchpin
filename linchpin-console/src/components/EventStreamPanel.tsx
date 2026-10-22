@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { useTranslation } from 'react-i18next';
 import { apiClient } from '../api/client';
 import { SSEClient } from '../api/sse';
 import type { SessionEvent, SessionStatus, PaginatedEventsResponse, StreamState } from '../types';
@@ -50,14 +51,24 @@ const HISTORY_PAGE_SIZE = 100;
 /** Safety cap on history pages pulled before falling back to the stream. */
 const MAX_HISTORY_PAGES = 20;
 
-const STREAM_STATE_LABELS: Record<StreamState, string> = {
-  connecting: 'Connecting…',
-  live: 'Live',
-  reconnecting: 'Reconnecting…',
-  closed: 'Offline',
+const STREAM_STATE_KEYS: Record<StreamState, string> = {
+  connecting: 'connecting',
+  live: 'live',
+  reconnecting: 'reconnecting',
+  closed: 'closed',
+};
+
+/** i18n keys for tool event labels (fallback: derived from the raw type). */
+const TOOL_LABEL_KEYS: Record<string, string> = {
+  'agent.tool_use': 'toolUse',
+  'agent.tool_result': 'toolResult',
+  'agent.mcp_tool_use': 'mcpToolUse',
+  'agent.mcp_tool_result': 'mcpToolResult',
+  'agent.custom_tool_use': 'customToolUse',
 };
 
 export default function EventStreamPanel({ sessionId, sessionStatus }: EventStreamPanelProps) {
+  const { t } = useTranslation('eventStream');
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [streamState, setStreamState] = useState<StreamState>('closed');
@@ -184,7 +195,7 @@ export default function EventStreamPanel({ sessionId, sessionStatus }: EventStre
     }
 
     if (event.type === 'session.requires_action') {
-      const toolName = (event.payload.tool_name as string) ?? 'Unknown tool';
+      const toolName = (event.payload.tool_name as string) ?? t('unknownTool');
       const args = (event.payload.arguments as Record<string, unknown>) ?? {};
       return (
         <div key={event.cursor} className="event-bubble event-bubble--requires-action" data-testid="event-requires-action">
@@ -199,7 +210,9 @@ export default function EventStreamPanel({ sessionId, sessionStatus }: EventStre
     }
 
     if (cls === 'tool') {
-      const label = event.type.replace('agent.', '').replace(/_/g, ' ');
+      const label = TOOL_LABEL_KEYS[event.type]
+        ? t(TOOL_LABEL_KEYS[event.type])
+        : event.type.replace('agent.', '').replace(/_/g, ' ');
       return (
         <div key={event.cursor} className="event-bubble event-bubble--tool" data-testid={`event-${cls}`}>
           <div className="tool-label">{label}</div>
@@ -211,7 +224,7 @@ export default function EventStreamPanel({ sessionId, sessionStatus }: EventStre
     if (cls === 'error') {
       return (
         <div key={event.cursor} className="event-bubble event-bubble--error" data-testid="event-error">
-          {(event.payload.message as string) ?? (event.payload.error as string) ?? 'An error occurred'}
+          {(event.payload.message as string) ?? (event.payload.error as string) ?? t('anErrorOccurred')}
         </div>
       );
     }
@@ -249,7 +262,7 @@ export default function EventStreamPanel({ sessionId, sessionStatus }: EventStre
       {showStateBadge && (
         <div className={`event-stream-state event-stream-state--${streamState}`} data-testid="stream-state">
           <span className="event-stream-state-dot" />
-          {STREAM_STATE_LABELS[streamState]}
+          {t(STREAM_STATE_KEYS[streamState])}
         </div>
       )}
       <div
@@ -259,7 +272,7 @@ export default function EventStreamPanel({ sessionId, sessionStatus }: EventStre
         data-testid="event-stream-list"
       >
         {events.length === 0 && streamingMessages.size === 0 ? (
-          <div className="event-stream-empty">No events yet.</div>
+          <div className="event-stream-empty">{t('noEvents')}</div>
         ) : (
           <>
             {events.map(renderEvent)}

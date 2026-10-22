@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type {
   WebhookEndpoint,
@@ -15,6 +16,7 @@ export default function WebhookDetailView() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation('webhooks');
 
   const [endpoint, setEndpoint] = useState<WebhookEndpoint | null>(null);
   const [loading, setLoading] = useState(true);
@@ -94,7 +96,7 @@ export default function WebhookDetailView() {
       setEndpoint(updated);
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to update webhook endpoint');
+      setActionError(apiErr.message || t('detailActionFailed'));
     } finally {
       setToggling(false);
     }
@@ -116,7 +118,7 @@ export default function WebhookDetailView() {
       }
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to rotate secret');
+      setActionError(apiErr.message || t('detailRotateFailed'));
     } finally {
       setRotating(false);
     }
@@ -131,7 +133,7 @@ export default function WebhookDetailView() {
       navigate('/webhooks');
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to delete webhook endpoint');
+      setActionError(apiErr.message || t('detailDeleteFailed'));
       setShowDeleteConfirm(false);
       setDeleting(false);
     }
@@ -161,18 +163,18 @@ export default function WebhookDetailView() {
   return (
     <div className="webhook-detail-view" data-testid="webhook-detail-view">
       <Link to="/webhooks" className="back-link" data-testid="back-link">
-        ← Webhooks
+        ← {t('listTitle')}
       </Link>
 
       <div className="webhook-detail-header">
-        <h1 data-testid="webhook-title">Webhook Endpoint</h1>
+        <h1 data-testid="webhook-title">{t('detailTitle')}</h1>
         <div className="webhook-detail-url">
           <code>{endpoint.url}</code>
           <span
             className={`webhook-enabled-badge ${endpoint.enabled ? 'is-enabled' : 'is-disabled'}`}
             data-testid="webhook-enabled-badge"
           >
-            {endpoint.enabled ? 'enabled' : 'disabled'}
+            {endpoint.enabled ? t('common:enabled') : t('common:disabled')}
           </span>
         </div>
         {endpoint.description && (
@@ -183,24 +185,23 @@ export default function WebhookDetailView() {
       {oneTimeSecret && (
         <div className="secret-banner" data-testid="secret-banner">
           <div className="secret-banner-header">
-            <strong>Signing secret — shown once</strong>
+            <strong>{t('detailSecretShownOnce')}</strong>
             <button
               className="secret-banner-dismiss"
               onClick={() => setOneTimeSecret(null)}
-              aria-label="Dismiss"
+              aria-label={t('detailDismiss')}
               data-testid="secret-banner-dismiss"
             >
               ✕
             </button>
           </div>
           <p className="secret-banner-hint">
-            Store this secret securely. It is used to sign delivery payloads and
-            cannot be retrieved again (rotate it to get a new one).
+            {t('detailSecretHint')}
           </p>
           <div className="secret-banner-row">
             <code data-testid="secret-value">{oneTimeSecret}</code>
             <button className="btn-copy-secret" onClick={handleCopySecret}>
-              {secretCopied ? 'Copied' : 'Copy'}
+              {secretCopied ? t('common:copied') : t('common:copy')}
             </button>
           </div>
         </div>
@@ -219,7 +220,7 @@ export default function WebhookDetailView() {
           onClick={handleToggleEnabled}
           data-testid={endpoint.enabled ? 'webhook-disable-btn' : 'webhook-enable-btn'}
         >
-          {toggling ? 'Working…' : endpoint.enabled ? 'Disable' : 'Enable'}
+          {toggling ? t('detailWorking') : endpoint.enabled ? t('common:disable') : t('common:enable')}
         </button>
         <button
           className="btn-sm-secondary"
@@ -227,7 +228,7 @@ export default function WebhookDetailView() {
           onClick={handleRotateSecret}
           data-testid="webhook-rotate-btn"
         >
-          {rotating ? 'Rotating…' : 'Rotate secret'}
+          {rotating ? t('detailRotating') : t('detailRotateSecret')}
         </button>
         <button
           className="btn-sm-danger"
@@ -235,32 +236,32 @@ export default function WebhookDetailView() {
           onClick={() => setShowDeleteConfirm(true)}
           data-testid="webhook-delete-btn"
         >
-          Delete
+          {t('common:delete')}
         </button>
       </section>
 
       <section className="detail-section" data-testid="webhook-info-section">
-        <h2>Configuration</h2>
+        <h2>{t('detailConfiguration')}</h2>
         <dl className="detail-grid">
-          <dt>Endpoint ID</dt>
+          <dt>{t('detailFieldEndpointId')}</dt>
           <dd><code>{endpoint.id}</code></dd>
-          <dt>URL</dt>
+          <dt>{t('detailFieldUrl')}</dt>
           <dd><code>{endpoint.url}</code></dd>
-          <dt>Status</dt>
-          <dd>{endpoint.enabled ? 'Enabled' : 'Disabled'}</dd>
-          <dt>Created</dt>
-          <dd>{new Date(endpoint.created_at).toLocaleString()}</dd>
+          <dt>{t('detailFieldStatus')}</dt>
+          <dd>{endpoint.enabled ? t('common:enabled') : t('common:disabled')}</dd>
+          <dt>{t('common:created')}</dt>
+          <dd>{new Date(endpoint.created_at).toLocaleString(i18n.language)}</dd>
           {endpoint.updated_at !== endpoint.created_at && (
             <>
-              <dt>Updated</dt>
-              <dd>{new Date(endpoint.updated_at).toLocaleString()}</dd>
+              <dt>{t('common:updated')}</dt>
+              <dd>{new Date(endpoint.updated_at).toLocaleString(i18n.language)}</dd>
             </>
           )}
         </dl>
       </section>
 
       <section className="detail-section" data-testid="webhook-events-section">
-        <h2>Subscribed Events</h2>
+        <h2>{t('detailSubscribedEvents')}</h2>
         {endpoint.enabled_events.length > 0 ? (
           <div className="webhook-events-chips">
             {endpoint.enabled_events.map(ev => (
@@ -271,40 +272,41 @@ export default function WebhookDetailView() {
           </div>
         ) : (
           <p className="webhook-events-default-note">
-            No explicit subscription — receives the default template
-            {' '}(<code>session.status_idle</code>, <code>session.error</code>,{' '}
-            <code>session.requires_action</code>).
+            {t('detailDefaultTemplateBefore')}
+            <code>session.status_idle</code>, <code>session.error</code>,{' '}
+            <code>session.requires_action</code>
+            {t('detailDefaultTemplateAfter')}
           </p>
         )}
       </section>
 
       <section className="detail-section" data-testid="deliveries-section">
         <h2>
-          Deliveries ({deliveries.length})
+          {t('detailDeliveries', { total: deliveries.length })}
           <button
             className="btn-refresh"
             onClick={fetchDeliveries}
             disabled={deliveriesLoading}
             data-testid="deliveries-refresh-btn"
           >
-            Refresh
+            {t('common:refresh')}
           </button>
         </h2>
         {deliveriesLoading ? (
           <LoadingSpinner />
         ) : deliveries.length === 0 ? (
-          <p className="empty-text">No deliveries recorded for this endpoint yet.</p>
+          <p className="empty-text">{t('detailNoDeliveries')}</p>
         ) : (
           <div className="deliveries-table-wrapper">
             <table className="deliveries-table">
               <thead>
                 <tr>
-                  <th>Event</th>
-                  <th>Status</th>
-                  <th>Attempts</th>
-                  <th>Last Attempt</th>
-                  <th>Code</th>
-                  <th>Error</th>
+                  <th>{t('detailColumnEvent')}</th>
+                  <th>{t('detailColumnStatus')}</th>
+                  <th>{t('detailColumnAttempts')}</th>
+                  <th>{t('detailColumnLastAttempt')}</th>
+                  <th>{t('detailColumnCode')}</th>
+                  <th>{t('detailColumnError')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -313,13 +315,13 @@ export default function WebhookDetailView() {
                     <td><code>{d.event_type}</code></td>
                     <td>
                       <span className={`delivery-status delivery-status--${d.status}`}>
-                        {d.status}
+                        {t(`status:${d.status}`, { defaultValue: String(d.status) })}
                       </span>
                     </td>
                     <td>{d.attempts}</td>
                     <td>
                       {d.last_attempt_at
-                        ? new Date(d.last_attempt_at).toLocaleString()
+                        ? new Date(d.last_attempt_at).toLocaleString(i18n.language)
                         : '—'}
                     </td>
                     <td>{d.last_status_code ?? '—'}</td>
@@ -340,8 +342,8 @@ export default function WebhookDetailView() {
 
       <ConfirmDialog
         open={showDeleteConfirm}
-        title="Delete Webhook Endpoint"
-        message="Are you sure you want to delete this endpoint? It will stop receiving events immediately."
+        title={t('detailDeleteTitle')}
+        message={t('detailDeleteMessage')}
         onConfirm={handleDelete}
         onCancel={() => setShowDeleteConfirm(false)}
       />

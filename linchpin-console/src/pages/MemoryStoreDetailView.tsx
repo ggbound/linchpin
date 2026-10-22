@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type {
   Memory,
@@ -26,6 +27,7 @@ function humanBytes(bytes: number): string {
 export default function MemoryStoreDetailView() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation('memoryStores');
 
   const [store, setStore] = useState<MemoryStore | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,7 +94,7 @@ export default function MemoryStoreDetailView() {
       setMemories(res.data);
       setMemoryError(null);
     } catch (err) {
-      setMemoryError((err as ApiError).message || 'Failed to load memories');
+      setMemoryError((err as ApiError).message || t('detailFailedToLoadMemories'));
     } finally {
       setMemoriesLoading(false);
     }
@@ -133,7 +135,7 @@ export default function MemoryStoreDetailView() {
       );
       setStore(updated);
     } catch (err) {
-      setActionError((err as ApiError).message || 'Failed to archive memory store');
+      setActionError((err as ApiError).message || t('detailFailedToArchive'));
     } finally {
       setArchiving(false);
     }
@@ -151,8 +153,8 @@ export default function MemoryStoreDetailView() {
       const apiErr = err as ApiError;
       setActionError(
         apiErr.status === 409
-          ? 'Cannot delete: a running session still has this store mounted. Terminate the session first, or archive the store instead.'
-          : apiErr.message || 'Failed to delete memory store',
+          ? t('detailDeleteConflict')
+          : apiErr.message || t('detailFailedToDelete'),
       );
       setDeleting(false);
     }
@@ -170,7 +172,7 @@ export default function MemoryStoreDetailView() {
       setStore(updated);
       setEditingDesc(false);
     } catch (err) {
-      setActionError((err as ApiError).message || 'Failed to update description');
+      setActionError((err as ApiError).message || t('detailFailedToUpdateDesc'));
     } finally {
       setSavingDesc(false);
     }
@@ -196,11 +198,11 @@ export default function MemoryStoreDetailView() {
       );
       const head = res.data[0];
       if (!head) {
-        setContentNote('No versions recorded for this memory.');
+        setContentNote(t('detailNoVersionsForMemory'));
       } else if (head.redacted_at) {
-        setContentNote('Content has been redacted and is no longer available.');
+        setContentNote(t('detailContentRedacted'));
       } else if (head.action === 'delete' || head.size_bytes === 0) {
-        setContentNote('(empty — memory was deleted)');
+        setContentNote(t('detailEmptyContent'));
       } else {
         const blob = await apiClient.download(
           `/v1/memory_stores/${id}/memory_versions/${head.id}/content`,
@@ -211,8 +213,8 @@ export default function MemoryStoreDetailView() {
       const apiErr = err as ApiError;
       setContentNote(
         apiErr.status === 404
-          ? 'Content has been redacted and is no longer available.'
-          : (apiErr.message || 'Failed to load memory content'),
+          ? t('detailContentRedacted')
+          : (apiErr.message || t('detailFailedToLoadContent')),
       );
     } finally {
       setContentLoading(false);
@@ -238,7 +240,7 @@ export default function MemoryStoreDetailView() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setActionError((err as ApiError).message || 'Failed to download version content');
+      setActionError((err as ApiError).message || t('detailFailedToDownloadVersion'));
     }
   };
 
@@ -264,8 +266,8 @@ export default function MemoryStoreDetailView() {
       const apiErr = err as ApiError;
       setMemoryError(
         apiErr.status === 412
-          ? 'Precondition failed — the memory changed since it was loaded. Reload and try again.'
-          : apiErr.message || 'Failed to write memory',
+          ? t('detailPreconditionFailed')
+          : apiErr.message || t('detailFailedToWrite'),
       );
     } finally {
       setCreatingMemory(false);
@@ -288,7 +290,7 @@ export default function MemoryStoreDetailView() {
       const mem = memories.find(m => m.path === expandedPath);
       if (mem) await openMemory({ ...mem, path: expandedPath });
     } catch (err) {
-      setMemoryError((err as ApiError).message || 'Failed to update memory');
+      setMemoryError((err as ApiError).message || t('detailFailedToUpdateMemory'));
     } finally {
       setSavingMemory(false);
     }
@@ -309,7 +311,7 @@ export default function MemoryStoreDetailView() {
       await fetchMemories();
       await fetchVersions();
     } catch (err) {
-      setMemoryError((err as ApiError).message || 'Failed to delete memory');
+      setMemoryError((err as ApiError).message || t('detailFailedToDeleteMemory'));
       setDeleteMemoryTarget(null);
     }
   };
@@ -331,7 +333,7 @@ export default function MemoryStoreDetailView() {
         if (mem) await openMemory(mem);
       }
     } catch (err) {
-      setMemoryError((err as ApiError).message || 'Failed to redact version');
+      setMemoryError((err as ApiError).message || t('detailFailedToRedact'));
       setRedactTarget(null);
     } finally {
       setRedacting(false);
@@ -362,7 +364,7 @@ export default function MemoryStoreDetailView() {
   return (
     <div className="memory-store-detail-view" data-testid="memory-store-detail-view">
       <Link to="/memory-stores" className="back-link" data-testid="back-link">
-        ← Memory Stores
+        {t('detailBackToStores')}
       </Link>
 
       <div className="memory-store-detail-header">
@@ -370,7 +372,7 @@ export default function MemoryStoreDetailView() {
           {store.name}
           {isArchived && (
             <span className="archived-badge" data-testid="archived-badge">
-              Archived
+              {t('detailArchivedBadge')}
             </span>
           )}
         </h1>
@@ -380,17 +382,17 @@ export default function MemoryStoreDetailView() {
           </span>
           <span className="meta-separator">·</span>
           <span data-testid="store-created">
-            Created {new Date(store.created_at).toLocaleString()}
+            {t('detailCreatedAt', { time: new Date(store.created_at).toLocaleString(i18n.language) })}
           </span>
           <span className="meta-separator">·</span>
           <span data-testid="store-updated">
-            Updated {new Date(store.updated_at).toLocaleString()}
+            {t('detailUpdatedAt', { time: new Date(store.updated_at).toLocaleString(i18n.language) })}
           </span>
           {isArchived && (
             <>
               <span className="meta-separator">·</span>
               <span data-testid="store-archived">
-                Archived {new Date(store.archived_at as string).toLocaleString()}
+                {t('detailArchivedAt', { time: new Date(store.archived_at as string).toLocaleString(i18n.language) })}
               </span>
             </>
           )}
@@ -409,7 +411,7 @@ export default function MemoryStoreDetailView() {
                   onClick={() => setEditingDesc(false)}
                   data-testid="store-desc-cancel"
                 >
-                  Cancel
+                  {t('common:cancel')}
                 </button>
                 <button
                   className="btn-primary"
@@ -417,14 +419,14 @@ export default function MemoryStoreDetailView() {
                   onClick={handleSaveDesc}
                   data-testid="store-desc-save"
                 >
-                  {savingDesc ? 'Saving…' : 'Save'}
+                  {savingDesc ? t('common:saving') : t('common:save')}
                 </button>
               </div>
             </div>
           ) : (
             <div className="memory-store-desc-display">
               <span data-testid="store-description">
-                {store.description || 'No description'}
+                {store.description || t('detailNoDescription')}
               </span>
               {!isArchived && (
                 <button
@@ -435,7 +437,7 @@ export default function MemoryStoreDetailView() {
                   }}
                   data-testid="store-desc-edit"
                 >
-                  Edit
+                  {t('common:edit')}
                 </button>
               )}
             </div>
@@ -457,7 +459,7 @@ export default function MemoryStoreDetailView() {
             onClick={() => setShowArchiveConfirm(true)}
             data-testid="archive-button"
           >
-            {archiving ? 'Archiving…' : 'Archive'}
+            {archiving ? t('detailArchiving') : t('detailArchive')}
           </button>
         )}
         <button
@@ -466,13 +468,13 @@ export default function MemoryStoreDetailView() {
           onClick={() => setShowDeleteConfirm(true)}
           data-testid="delete-button"
         >
-          {deleting ? 'Deleting…' : 'Delete'}
+          {deleting ? t('common:deleting') : t('common:delete')}
         </button>
       </section>
 
       <section className="detail-section" data-testid="memories-section">
         <div className="memory-section-header">
-          <h2>Memories</h2>
+          <h2>{t('detailMemories')}</h2>
           {!isArchived && (
             <button
               className="btn-primary"
@@ -482,7 +484,7 @@ export default function MemoryStoreDetailView() {
               }}
               data-testid="new-memory-btn"
             >
-              New memory
+              {t('detailNewMemory')}
             </button>
           )}
         </div>
@@ -497,17 +499,16 @@ export default function MemoryStoreDetailView() {
           <LoadingSpinner />
         ) : memories.length === 0 ? (
           <p className="empty-text" data-testid="memories-empty">
-            No memories yet. Entries appear here when written by sessions or via
-            the API.
+            {t('detailMemoriesEmpty')}
           </p>
         ) : (
           <table className="memory-entries-table" data-testid="memory-table">
             <thead>
               <tr>
-                <th>Path</th>
-                <th>Size</th>
-                <th>Updated</th>
-                <th>Actions</th>
+                <th>{t('detailColumnPath')}</th>
+                <th>{t('detailColumnSize')}</th>
+                <th>{t('common:updated')}</th>
+                <th>{t('common:actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -540,25 +541,25 @@ export default function MemoryStoreDetailView() {
       </section>
 
       <section className="detail-section" data-testid="versions-section">
-        <h2>Recent versions</h2>
+        <h2>{t('detailRecentVersions')}</h2>
         {versionsLoading ? (
           <LoadingSpinner />
         ) : versions.length === 0 ? (
           <p className="empty-text" data-testid="versions-empty">
-            No versions recorded yet.
+            {t('detailNoVersions')}
           </p>
         ) : (
           <table className="memory-versions-table" data-testid="version-table">
             <thead>
               <tr>
-                <th>Seq</th>
-                <th>Action</th>
-                <th>Path</th>
-                <th>Author</th>
-                <th>Size</th>
-                <th>Created</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th>{t('detailColumnSeq')}</th>
+                <th>{t('detailColumnAction')}</th>
+                <th>{t('detailColumnPath')}</th>
+                <th>{t('detailColumnAuthor')}</th>
+                <th>{t('detailColumnSize')}</th>
+                <th>{t('common:created')}</th>
+                <th>{t('detailColumnStatus')}</th>
+                <th>{t('common:actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -575,12 +576,12 @@ export default function MemoryStoreDetailView() {
                     </td>
                     <td>{ver.author}</td>
                     <td>{humanBytes(ver.size_bytes)}</td>
-                    <td>{new Date(ver.created_at).toLocaleString()}</td>
+                    <td>{new Date(ver.created_at).toLocaleString(i18n.language)}</td>
                     <td>
                       {ver.redacted_at ? (
-                        <span className="redacted-badge">Redacted</span>
+                        <span className="redacted-badge">{t('detailRedactedBadge')}</span>
                       ) : (
-                        <span className="memory-version-status-ok">Retained</span>
+                        <span className="memory-version-status-ok">{t('detailRetainedBadge')}</span>
                       )}
                     </td>
                     <td>
@@ -591,7 +592,7 @@ export default function MemoryStoreDetailView() {
                             onClick={() => handleDownloadVersion(ver)}
                             data-testid={`version-download-btn-${ver.id}`}
                           >
-                            Download
+                            {t('common:download')}
                           </button>
                         )}
                         {!ver.redacted_at && (
@@ -604,7 +605,7 @@ export default function MemoryStoreDetailView() {
                             }}
                             data-testid={`redact-btn-${ver.id}`}
                           >
-                            Redact
+                            {t('detailRedact')}
                           </button>
                         )}
                       </div>
@@ -621,9 +622,9 @@ export default function MemoryStoreDetailView() {
       {createMemoryOpen && (
         <div className="memory-detail-dialog-overlay">
           <div className="memory-detail-dialog" data-testid="memory-create-dialog">
-            <h2>New memory</h2>
+            <h2>{t('detailNewMemory')}</h2>
             <div className="form-field">
-              <label htmlFor="memory-create-path">Path</label>
+              <label htmlFor="memory-create-path">{t('detailFieldPath')}</label>
               <input
                 id="memory-create-path"
                 value={newPath}
@@ -634,7 +635,7 @@ export default function MemoryStoreDetailView() {
               />
             </div>
             <div className="form-field">
-              <label htmlFor="memory-create-content">Content</label>
+              <label htmlFor="memory-create-content">{t('detailFieldContent')}</label>
               <textarea
                 id="memory-create-content"
                 value={newContent}
@@ -648,7 +649,7 @@ export default function MemoryStoreDetailView() {
                 onClick={() => setCreateMemoryOpen(false)}
                 data-testid="memory-create-cancel"
               >
-                Cancel
+                {t('common:cancel')}
               </button>
               <button
                 className="btn-primary"
@@ -656,7 +657,7 @@ export default function MemoryStoreDetailView() {
                 onClick={handleCreateMemory}
                 data-testid="memory-create-submit"
               >
-                {creatingMemory ? 'Writing…' : 'Write memory'}
+                {creatingMemory ? t('detailWriting') : t('detailWriteMemory')}
               </button>
             </div>
           </div>
@@ -667,19 +668,17 @@ export default function MemoryStoreDetailView() {
       {redactTarget && (
         <div className="memory-detail-dialog-overlay">
           <div className="memory-detail-dialog" data-testid="redact-dialog">
-            <h2>Redact version #{redactTarget.seq}</h2>
+            <h2>{t('detailRedactVersionTitle', { seq: redactTarget.seq })}</h2>
             <p className="memory-dialog-note">
-              Permanently zero this version's bytes for compliance (e.g. GDPR).
-              If it is the current head, a redaction marker version is written
-              and the memory is removed from the store view. This cannot be undone.
+              {t('detailRedactDescription')}
             </p>
             <div className="form-field">
-              <label htmlFor="redact-reason">Reason</label>
+              <label htmlFor="redact-reason">{t('detailRedactReason')}</label>
               <input
                 id="redact-reason"
                 value={redactReason}
                 onChange={e => setRedactReason(e.target.value)}
-                placeholder="GDPR erasure request #123"
+                placeholder={t('detailRedactReasonPlaceholder')}
                 autoFocus
                 data-testid="redact-reason"
               />
@@ -689,7 +688,7 @@ export default function MemoryStoreDetailView() {
                 onClick={() => setRedactTarget(null)}
                 data-testid="redact-cancel"
               >
-                Cancel
+                {t('common:cancel')}
               </button>
               <button
                 className="btn-sm-danger"
@@ -697,7 +696,7 @@ export default function MemoryStoreDetailView() {
                 onClick={handleRedact}
                 data-testid="redact-confirm"
               >
-                {redacting ? 'Redacting…' : 'Redact version'}
+                {redacting ? t('detailRedacting') : t('detailRedactVersion')}
               </button>
             </div>
           </div>
@@ -706,24 +705,24 @@ export default function MemoryStoreDetailView() {
 
       <ConfirmDialog
         open={showArchiveConfirm}
-        title="Archive Memory Store"
-        message={`Archive "${store.name}"? Archived stores cannot be mounted by new sessions but remain reachable for forensics.`}
+        title={t('detailArchiveConfirmTitle')}
+        message={t('detailArchiveConfirmMessage', { name: store.name })}
         onConfirm={handleArchive}
         onCancel={() => setShowArchiveConfirm(false)}
       />
       <ConfirmDialog
         open={showDeleteConfirm}
-        title="Delete Memory Store"
-        message={`Permanently delete "${store.name}" and all its memories and versions? This fails while a running session still has the store mounted.`}
+        title={t('detailDeleteConfirmTitle')}
+        message={t('detailDeleteConfirmMessage', { name: store.name })}
         onConfirm={handleDelete}
         onCancel={() => setShowDeleteConfirm(false)}
       />
       <ConfirmDialog
         open={deleteMemoryTarget !== null}
-        title="Delete Memory"
+        title={t('detailDeleteMemoryTitle')}
         message={
           deleteMemoryTarget
-            ? `Soft-delete memory "${deleteMemoryTarget.path}"? A delete version is written so the history stays intact within the retention window.`
+            ? t('detailDeleteMemoryMessage', { path: deleteMemoryTarget.path })
             : ''
         }
         onConfirm={handleDeleteMemory}
@@ -772,6 +771,7 @@ function MemoryRow({
   onEditSave,
   onDelete,
 }: MemoryRowProps) {
+  const { t, i18n } = useTranslation('memoryStores');
   return (
     <>
       <tr
@@ -785,7 +785,7 @@ function MemoryRow({
           <code>{mem.path}</code>
         </td>
         <td>{humanBytes(mem.size_bytes)}</td>
-        <td>{new Date(mem.updated_at).toLocaleString()}</td>
+        <td>{new Date(mem.updated_at).toLocaleString(i18n.language)}</td>
         <td>
           {!archived && (
             <button
@@ -797,7 +797,7 @@ function MemoryRow({
               }}
               data-testid={`memory-delete-btn-${mem.path}`}
             >
-              Delete
+              {t('common:delete')}
             </button>
           )}
         </td>
@@ -817,7 +817,7 @@ function MemoryRow({
                 />
                 <div className="memory-content-editor-actions">
                   <button onClick={onEditCancel} data-testid="memory-edit-cancel">
-                    Cancel
+                    {t('common:cancel')}
                   </button>
                   <button
                     className="btn-primary"
@@ -825,7 +825,7 @@ function MemoryRow({
                     onClick={onEditSave}
                     data-testid="memory-edit-save"
                   >
-                    {saving ? 'Saving…' : 'Save'}
+                    {saving ? t('common:saving') : t('common:save')}
                   </button>
                 </div>
               </div>
@@ -836,7 +836,7 @@ function MemoryRow({
                 <pre data-testid="memory-content">{content}</pre>
                 <div className="memory-content-editor-actions">
                   <button onClick={onEditStart} data-testid="memory-edit-btn">
-                    Edit
+                    {t('common:edit')}
                   </button>
                 </div>
               </div>

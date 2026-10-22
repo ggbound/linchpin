@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { Deployment, Agent, Environment, PaginatedResponse } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -8,6 +9,7 @@ import './DeploymentListView.css';
 
 export default function DeploymentListView() {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation('deployments');
 
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [agentNames, setAgentNames] = useState<Record<string, string>>({});
@@ -57,7 +59,7 @@ export default function DeploymentListView() {
       setDeployments(prev => prev.map(d => (d.id === dep.id ? updated : d)));
     } catch (err) {
       const apiErr = err as ApiError;
-      setActionError(apiErr.message || 'Failed to update deployment');
+      setActionError(apiErr.message || t('listActionFailed'));
     } finally {
       setTogglingId(null);
     }
@@ -83,15 +85,15 @@ export default function DeploymentListView() {
     <div className="deployment-list-view" data-testid="deployment-list-view">
       <div className="deployment-list-header">
         <div>
-          <h1>Deployments</h1>
-          <p>Scheduled agent runs driven by cron expressions.</p>
+          <h1>{t('listTitle')}</h1>
+          <p>{t('listSubtitle')}</p>
         </div>
         <button
           className="btn-primary"
           data-testid="new-deployment-btn"
           onClick={() => navigate('/deployments/new')}
         >
-          New deployment
+          {t('listNew')}
         </button>
       </div>
 
@@ -105,20 +107,20 @@ export default function DeploymentListView() {
         <table className="deployment-table" data-testid="deployment-table">
           <thead>
             <tr>
-              <th>Agent</th>
-              <th>Environment</th>
-              <th>Cron</th>
-              <th>Timezone</th>
-              <th>Next Run</th>
-              <th>Status</th>
-              <th>Actions</th>
+              <th>{t('listColumnAgent')}</th>
+              <th>{t('listColumnEnvironment')}</th>
+              <th>{t('listColumnCron')}</th>
+              <th>{t('listColumnTimezone')}</th>
+              <th>{t('listColumnNextRun')}</th>
+              <th>{t('listColumnStatus')}</th>
+              <th>{t('common:actions')}</th>
             </tr>
           </thead>
           <tbody>
             {deployments.length === 0 ? (
               <tr>
                 <td colSpan={7} className="empty-row">
-                  No deployments yet. Create one to schedule recurring agent runs.
+                  {t('listEmpty')}
                 </td>
               </tr>
             ) : (
@@ -156,12 +158,12 @@ export default function DeploymentListView() {
                   <td>{dep.timezone}</td>
                   <td data-testid="deployment-cell-next-run">
                     {dep.status === 'active' && dep.next_run_at
-                      ? new Date(dep.next_run_at).toLocaleString()
+                      ? new Date(dep.next_run_at).toLocaleString(i18n.language)
                       : '—'}
                   </td>
                   <td>
                     <span className={`deployment-status deployment-status--${dep.status}`}>
-                      {dep.status}
+                      {t(`status:${dep.status}`, { defaultValue: dep.status })}
                     </span>
                   </td>
                   <td>
@@ -176,7 +178,7 @@ export default function DeploymentListView() {
                         onClick={() => handleToggle(dep)}
                         data-testid={`deployment-${dep.status === 'active' ? 'pause' : 'resume'}-btn`}
                       >
-                        {dep.status === 'active' ? 'Pause' : 'Resume'}
+                        {dep.status === 'active' ? t('listPause') : t('listResume')}
                       </button>
                     </div>
                   </td>

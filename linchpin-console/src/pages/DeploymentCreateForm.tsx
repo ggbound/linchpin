@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { apiClient, ApiError } from '../api/client';
 import type { Agent, Environment, Deployment, InitialEventConfig, PaginatedResponse } from '../types';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -15,6 +16,7 @@ interface EventRow {
 
 export default function DeploymentCreateForm() {
   const navigate = useNavigate();
+  const { t } = useTranslation('deployments');
 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [environments, setEnvironments] = useState<Environment[]>([]);
@@ -66,7 +68,7 @@ export default function DeploymentCreateForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (cronInvalid) {
-      setCreateError('Invalid cron expression — expected 5 space-separated fields, e.g. 0 9 * * 1-5.');
+      setCreateError(t('createInvalidCron'));
       return;
     }
     setCreating(true);
@@ -89,7 +91,7 @@ export default function DeploymentCreateForm() {
       navigate(`/deployments/${created.id}`);
     } catch (err) {
       const apiErr = err as ApiError;
-      setCreateError(apiErr.message || 'Failed to create deployment');
+      setCreateError(apiErr.message || t('createFailed'));
       setCreating(false);
     }
   };
@@ -113,19 +115,18 @@ export default function DeploymentCreateForm() {
   return (
     <div className="deployment-create-view" data-testid="deployment-create-view">
       <Link to="/deployments" className="back-link" data-testid="back-link">
-        ← Deployments
+        ← {t('listTitle')}
       </Link>
 
-      <h1 className="deployment-create-title">New Deployment</h1>
+      <h1 className="deployment-create-title">{t('createTitle')}</h1>
       <p className="deployment-create-subtitle">
-        Schedule an agent to run automatically on a cron expression. Every trigger spawns a
-        fresh session in the selected environment and seeds the configured initial events.
+        {t('createSubtitle')}
       </p>
 
       <form className="deployment-form" onSubmit={handleSubmit} data-testid="deployment-create-form">
         <div className="deployment-form-row">
           <div className="form-field">
-            <label htmlFor="dep-agent">Agent</label>
+            <label htmlFor="dep-agent">{t('createFieldAgent')}</label>
             <select
               id="dep-agent"
               value={agentId}
@@ -133,14 +134,14 @@ export default function DeploymentCreateForm() {
               required
               data-testid="dep-agent-select"
             >
-              {agents.length === 0 && <option value="">No agents available</option>}
+              {agents.length === 0 && <option value="">{t('createNoAgents')}</option>}
               {agents.map(a => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
           </div>
           <div className="form-field">
-            <label htmlFor="dep-env">Environment</label>
+            <label htmlFor="dep-env">{t('createFieldEnvironment')}</label>
             <select
               id="dep-env"
               value={environmentId}
@@ -148,7 +149,7 @@ export default function DeploymentCreateForm() {
               required
               data-testid="dep-env-select"
             >
-              {environments.length === 0 && <option value="">No environments available</option>}
+              {environments.length === 0 && <option value="">{t('createNoEnvironments')}</option>}
               {environments.map(e => (
                 <option key={e.id} value={e.id}>{e.name}</option>
               ))}
@@ -158,7 +159,7 @@ export default function DeploymentCreateForm() {
 
         <div className="deployment-form-row">
           <div className="form-field">
-            <label htmlFor="dep-cron">Cron Expression</label>
+            <label htmlFor="dep-cron">{t('createFieldCron')}</label>
             <input
               id="dep-cron"
               type="text"
@@ -169,17 +170,16 @@ export default function DeploymentCreateForm() {
               data-testid="dep-cron-input"
             />
             <p className="section-hint">
-              5-field cron: minute hour day month weekday — e.g. <code>0 9 * * 1-5</code> runs
-              weekdays at 09:00.
+              {t('createCronHintPrefix')} <code>0 9 * * 1-5</code> {t('createCronHintSuffix')}
             </p>
             {cronInvalid && (
               <div className="form-error" role="alert" data-testid="dep-cron-error">
-                Invalid cron expression — expected 5 space-separated fields, e.g. 0 9 * * 1-5.
+                {t('createInvalidCron')}
               </div>
             )}
           </div>
           <div className="form-field">
-            <label htmlFor="dep-timezone">Timezone</label>
+            <label htmlFor="dep-timezone">{t('createFieldTimezone')}</label>
             <select
               id="dep-timezone"
               value={timezone}
@@ -193,15 +193,14 @@ export default function DeploymentCreateForm() {
                 <option key={tz} value={tz}>{tz}</option>
               ))}
             </select>
-            <p className="section-hint">IANA timezone used to evaluate the cron schedule.</p>
+            <p className="section-hint">{t('createTimezoneHint')}</p>
           </div>
         </div>
 
         <div className="form-field">
-          <label>Initial Events (optional)</label>
+          <label>{t('createInitialEventsOptional')}</label>
           <p className="section-hint">
-            Events seeded into every session this deployment triggers. Only
-            user.message / user.steer are supported.
+            {t('createEventsHint')}
           </p>
           {eventRows.map((row, idx) => (
             <div className="dep-event-row" key={idx} data-testid="dep-event-row">
@@ -217,7 +216,7 @@ export default function DeploymentCreateForm() {
                 type="text"
                 value={row.content}
                 onChange={e => updateRow(idx, { content: e.target.value })}
-                placeholder="Message content delivered to the agent"
+                placeholder={t('createEventContentPlaceholder')}
                 data-testid="dep-event-content"
               />
               <button
@@ -225,7 +224,7 @@ export default function DeploymentCreateForm() {
                 className="dep-event-remove"
                 onClick={() => setEventRows(prev => prev.filter((_, i) => i !== idx))}
                 disabled={eventRows.length === 1}
-                aria-label="Remove event"
+                aria-label={t('createRemoveEventAriaLabel')}
                 data-testid="dep-event-remove"
               >
                 ✕
@@ -238,7 +237,7 @@ export default function DeploymentCreateForm() {
             onClick={() => setEventRows(prev => [...prev, { type: 'user.message', content: '' }])}
             data-testid="dep-event-add"
           >
-            + Add event
+            {t('createAddEvent')}
           </button>
         </div>
 
@@ -255,9 +254,9 @@ export default function DeploymentCreateForm() {
             disabled={creating || !agentId || !environmentId || !cron.trim() || cronInvalid}
             data-testid="deployment-create-submit"
           >
-            {creating ? 'Creating…' : 'Create deployment'}
+            {creating ? t('common:creating') : t('createSubmit')}
           </button>
-          <Link to="/deployments" className="btn-cancel-link">Cancel</Link>
+          <Link to="/deployments" className="btn-cancel-link">{t('common:cancel')}</Link>
         </div>
       </form>
     </div>
