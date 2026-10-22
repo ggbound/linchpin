@@ -302,6 +302,10 @@ class OpenRouterProvider:
     ``httpx`` rather than depending on the ``openai`` SDK.
     """
 
+    # Upstream label used in error messages; ``OpenAIProvider`` overrides it
+    # so failures surface the right vendor name.
+    _label = "OpenRouter"
+
     def __init__(self, base_url: str = OPENROUTER_DEFAULT_BASE_URL) -> None:
         self._base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(timeout=120.0)
@@ -349,12 +353,12 @@ class OpenRouterProvider:
                 )
                 if resp.status_code in (429, 500, 502, 503):
                     raise RetryableError(
-                        f"OpenRouter returned {resp.status_code}: "
+                        f"{self._label} returned {resp.status_code}: "
                         f"{_extract_openrouter_error(resp)}"
                     )
                 if resp.status_code >= 400:
                     raise ProviderError(
-                        f"OpenRouter returned {resp.status_code}: "
+                        f"{self._label} returned {resp.status_code}: "
                         f"{_extract_openrouter_error(resp)}"
                     )
                 return _parse_openrouter_response(resp.json())
@@ -390,13 +394,13 @@ class OpenRouterProvider:
                     detail = await _read_stream_body(resp)
                     await resp.aclose()
                     raise RetryableError(
-                        f"OpenRouter returned {resp.status_code}: {detail}"
+                        f"{self._label} returned {resp.status_code}: {detail}"
                     )
                 if resp.status_code >= 400:
                     detail = await _read_stream_body(resp)
                     await resp.aclose()
                     raise ProviderError(
-                        f"OpenRouter returned {resp.status_code}: {detail}"
+                        f"{self._label} returned {resp.status_code}: {detail}"
                     )
                 return resp
             except (RetryableError, ProviderError):
@@ -487,6 +491,34 @@ class OpenRouterProvider:
                     )
         finally:
             await resp.aclose()
+
+
+# ---------------------------------------------------------------------------
+# OpenAI
+# ---------------------------------------------------------------------------
+
+OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1"
+
+
+class OpenAIProvider(OpenRouterProvider):
+    """Adapter for the OpenAI chat-completions API.
+
+    OpenAI uses the same wire protocol as OpenRouter (both speak the OpenAI
+    Chat Completions shape), so the request/response handling is inherited
+    from ``OpenRouterProvider``. Only the default endpoint differs and the
+    OpenRouter-specific ``HTTP-Referer`` / ``X-Title`` headers are dropped.
+    """
+
+    _label = "OpenAI"
+
+    def __init__(self, base_url: str = OPENAI_DEFAULT_BASE_URL) -> None:
+        super().__init__(base_url=base_url)
+
+    def _build_headers(self, api_key: str | None) -> dict:
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        return headers
 
 
 # ---------------------------------------------------------------------------
@@ -657,6 +689,8 @@ def get_provider(config: ModelConfig) -> ModelProviderProtocol:
     """
     if config.provider == "openrouter":
         return OpenRouterProvider(base_url=config.base_url or OPENROUTER_DEFAULT_BASE_URL)
+    if config.provider == "openai":
+        return OpenAIProvider(base_url=config.base_url or OPENAI_DEFAULT_BASE_URL)
     if config.provider == "ollama":
         return OllamaProvider(base_url=config.base_url or "http://localhost:11434")
     raise ValueError(f"Unknown provider: {config.provider}")

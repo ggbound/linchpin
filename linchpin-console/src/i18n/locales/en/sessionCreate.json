@@ -10,6 +10,7 @@
   "ttlPlaceholder": "e.g. 3600",
   "ttlHint": "Idle sessions are reaped after this many seconds. Must be at least 1.",
   "vaultsOptional": "Credential Vaults (optional)",
+  "vaultsHint": "Selected vaults serve two purposes: providing MCP credentials for the session and resolving the API key for the agent's model provider.",
   "noVaults": "No vaults available",
   "mountsOptional": "Resource Mounts (optional)",
   "fileUploaded": "File (uploaded)",

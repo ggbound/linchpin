@@ -4,7 +4,7 @@
 
 /** LLM provider configuration. */
 export interface ModelConfig {
-  provider: "openrouter" | "ollama";
+  provider: "openrouter" | "openai" | "ollama";
   id: string;
   base_url?: string;
 }
@@ -659,7 +659,7 @@ export interface PostEventsRequest {
 // ---------------------------------------------------------------------------
 
 export type CredentialType = "bearer_token" | "api_key" | "oauth" | "byok_kek";
-export type ProviderName = "openrouter" | "ollama";
+export type ProviderName = "openrouter" | "openai" | "ollama";
 
 /** Vault domain model. */
 export interface Vault {

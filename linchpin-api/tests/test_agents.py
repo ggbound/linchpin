@@ -95,6 +95,27 @@ def test_create_agent_returns_201(mock_fetch, client):
 
 
 @patch("app.routes.agents.fetch_one", new_callable=AsyncMock)
+def test_create_agent_with_openai_provider(mock_fetch, client):
+    """Agent creation with the direct OpenAI provider is accepted."""
+    model = {"provider": "openai", "id": "gpt-4o", "base_url": None}
+    mock_fetch.return_value = _make_agent_row(name="openai-agent", model=model)
+
+    payload = {
+        "name": "openai-agent",
+        "model": {"provider": "openai", "id": "gpt-4o"},
+        "system": "You are a helpful assistant.",
+        "tools": [],
+        "mcp_servers": [],
+    }
+    resp = client.post("/v1/agents", json=payload, headers=AUTH)
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["model"]["provider"] == "openai"
+    assert body["model"]["id"] == "gpt-4o"
+
+
+@patch("app.routes.agents.fetch_one", new_callable=AsyncMock)
 def test_create_agent_with_tools(mock_fetch, client):
     """Agent creation with tools stores them correctly."""
     tools = [
@@ -244,6 +265,27 @@ def test_update_agent_model_returns_200(mock_fetch, mock_execute, client):
     assert resp.status_code == 200
     assert resp.json()["model"]["provider"] == "openrouter"
     assert resp.json()["model"]["id"] == "openai/gpt-4o"
+
+
+@patch("app.routes.agents.execute", new_callable=AsyncMock)
+@patch("app.routes.agents.fetch_one", new_callable=AsyncMock)
+def test_update_agent_model_to_openai_returns_200(mock_fetch, mock_execute, client):
+    """Switching an agent to the direct OpenAI provider returns 200."""
+    aid = str(uuid.uuid4())
+    new_model = {"provider": "openai", "id": "gpt-4o", "base_url": "https://api.openai.com/v1"}
+    mock_fetch.side_effect = [_make_agent_row(agent_id=aid, model=new_model, version=2), _make_agent_row(agent_id=aid, model=new_model, version=2)]
+
+    resp = client.patch(
+        f"/v1/agents/{aid}",
+        json={"model": {"provider": "openai", "id": "gpt-4o", "base_url": "https://api.openai.com/v1"}},
+        headers=AUTH,
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["model"]["provider"] == "openai"
+    assert body["model"]["id"] == "gpt-4o"
+    assert body["model"]["base_url"] == "https://api.openai.com/v1"
 
 
 @patch("app.routes.agents.execute", new_callable=AsyncMock)

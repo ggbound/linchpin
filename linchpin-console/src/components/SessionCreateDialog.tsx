@@ -289,6 +289,9 @@ export default function SessionCreateDialog({ open, onClose, onCreated }: Sessio
                 ))
               )}
             </div>
+            <p className="dialog-hint" data-testid="session-vault-hint">
+              {t('vaultsHint')}
+            </p>
           </div>
 
           <div className="form-field">

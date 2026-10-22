@@ -345,6 +345,7 @@ export default function VaultDetailView() {
                     data-testid="cred-provider-select"
                   >
                     <option value="openrouter">OpenRouter</option>
+                    <option value="openai">OpenAI</option>
                     <option value="ollama">Ollama</option>
                   </select>
                 </div>
@@ -361,6 +362,11 @@ export default function VaultDetailView() {
                   />
                 </div>
               </div>
+            )}
+            {credType === 'api_key' && (
+              <p className="section-hint" data-testid="api-key-hint">
+                {t('detailApiKeyHint')}
+              </p>
             )}
 
             {credType === 'byok_kek' && (

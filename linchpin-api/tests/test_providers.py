@@ -1,4 +1,4 @@
-"""Unit tests for model provider adapters (OpenRouter + Ollama).
+"""Unit tests for model provider adapters (OpenRouter + OpenAI + Ollama).
 
 Covers:
 - Each provider constructs correct API calls
@@ -18,7 +18,9 @@ from app.providers import (
     ContentBlock,
     ModelResponse,
     OllamaProvider,
+    OpenAIProvider,
     OpenRouterProvider,
+    OPENAI_DEFAULT_BASE_URL,
     OPENROUTER_DEFAULT_BASE_URL,
     ProviderError,
     RetryableError,
@@ -35,6 +37,10 @@ from app.providers import (
 
 def _openrouter_config(model_id: str = "anthropic/claude-sonnet-4") -> ModelConfig:
     return ModelConfig(provider="openrouter", id=model_id)
+
+
+def _openai_config(model_id: str = "gpt-4o") -> ModelConfig:
+    return ModelConfig(provider="openai", id=model_id)
 
 
 def _ollama_config() -> ModelConfig:
@@ -452,6 +458,80 @@ class TestOpenRouterProviderSend:
 
 
 # ---------------------------------------------------------------------------
+# OpenAIProvider.send
+# ---------------------------------------------------------------------------
+
+
+class TestOpenAIProviderSend:
+    @pytest.mark.asyncio
+    async def test_sends_correct_params(self):
+        provider = OpenAIProvider()
+        response_data = {
+            "choices": [{"message": {"content": "Hi"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+        }
+        mock_resp = _mock_post_response(200, response_data)
+
+        provider._client = MagicMock()
+        provider._client.post = AsyncMock(return_value=mock_resp)
+
+        messages = [{"role": "user", "content": "Hello"}]
+        result = await provider.send(messages, _openai_config(), api_key="sk-test")
+
+        provider._client.post.assert_called_once()
+        call_args = provider._client.post.call_args
+        assert call_args[0][0] == f"{OPENAI_DEFAULT_BASE_URL}/chat/completions"
+        body = call_args[1]["json"]
+        assert body["model"] == "gpt-4o"
+        assert body["messages"] == messages
+        headers = call_args[1]["headers"]
+        assert headers["Authorization"] == "Bearer sk-test"
+        assert headers["Content-Type"] == "application/json"
+        # OpenRouter-specific headers must not leak into OpenAI requests.
+        assert "HTTP-Referer" not in headers
+        assert "X-Title" not in headers
+        assert result.content[0].text == "Hi"
+        assert result.usage == {"input_tokens": 5, "output_tokens": 3, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+
+    @pytest.mark.asyncio
+    async def test_custom_base_url(self):
+        provider = OpenAIProvider(base_url="https://openai.example.com/v1")
+        mock_resp = _mock_post_response(
+            200,
+            {"choices": [{"message": {"content": "Hi"}, "finish_reason": "stop"}]},
+        )
+        provider._client = MagicMock()
+        provider._client.post = AsyncMock(return_value=mock_resp)
+
+        await provider.send(
+            [{"role": "user", "content": "Hi"}], _openai_config(), api_key="sk-test"
+        )
+
+        call_args = provider._client.post.call_args
+        assert call_args[0][0] == "https://openai.example.com/v1/chat/completions"
+
+    @pytest.mark.asyncio
+    async def test_error_message_uses_openai_label(self):
+        """Failures must surface "OpenAI returned ..." instead of OpenRouter."""
+        provider = OpenAIProvider()
+
+        resp = MagicMock()
+        resp.status_code = 404
+        resp.text = '{"error":{"message":"model not found","code":404}}'
+        resp.reason_phrase = "Not Found"
+        resp.json.return_value = {"error": {"message": "model not found", "code": 404}}
+        provider._client = MagicMock()
+        provider._client.post = AsyncMock(return_value=resp)
+
+        with pytest.raises(ProviderError, match="OpenAI returned 404"):
+            await provider.send(
+                [{"role": "user", "content": "Hi"}],
+                _openai_config("gpt-nonexistent"),
+                api_key="sk-test",
+            )
+
+
+# ---------------------------------------------------------------------------
 # OllamaProvider.send
 # ---------------------------------------------------------------------------
 
@@ -553,6 +633,22 @@ class TestGetProvider:
         )
         provider = get_provider(config)
         assert isinstance(provider, OpenRouterProvider)
+        assert provider._base_url == "https://example.com/v1"
+
+    def test_returns_openai(self):
+        config = _openai_config()
+        provider = get_provider(config)
+        assert isinstance(provider, OpenAIProvider)
+        assert provider._base_url == OPENAI_DEFAULT_BASE_URL
+
+    def test_openai_custom_base_url(self):
+        config = ModelConfig(
+            provider="openai",
+            id="gpt-4o",
+            base_url="https://example.com/v1",
+        )
+        provider = get_provider(config)
+        assert isinstance(provider, OpenAIProvider)
         assert provider._base_url == "https://example.com/v1"
 
     def test_returns_ollama(self):

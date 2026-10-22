@@ -32,6 +32,7 @@
   "detailProvider": "Provider",
   "detailApiKey": "API Key",
   "detailApiKeyPlaceholder": "API key",
+  "detailApiKeyHint": "This key is used for LLM calls to the selected provider: it is matched and injected at runtime only when this vault is selected during session creation (otherwise the session fails with a missing-credential error unless an environment variable is set).",
   "detailKek": "KEK (Fernet key)",
   "detailKekPlaceholder": "e.g. gAAAAA... (Fernet.generate_key())",
   "detailAccessToken": "Access Token",

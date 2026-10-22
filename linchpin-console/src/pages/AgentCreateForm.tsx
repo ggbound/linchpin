@@ -126,7 +126,7 @@ export default function AgentCreateForm() {
   // --- Build request body ---
   const buildRequest = (): CreateAgentRequest => {
     const model: ModelConfig = { provider, id: modelId };
-    if (provider === 'ollama' && baseUrl.trim()) {
+    if ((provider === 'openai' || provider === 'ollama') && baseUrl.trim()) {
       model.base_url = baseUrl.trim();
     }
 
@@ -306,6 +306,7 @@ export default function AgentCreateForm() {
               onChange={(e) => setProvider(e.target.value as ModelConfig['provider'])}
             >
               <option value="openrouter">OpenRouter</option>
+              <option value="openai">OpenAI</option>
               <option value="ollama">Ollama</option>
             </select>
           </div>
@@ -321,7 +322,7 @@ export default function AgentCreateForm() {
             />
             {renderFieldErrors('model.id')}
           </div>
-          {provider === 'ollama' && (
+          {(provider === 'openai' || provider === 'ollama') && (
             <div className="form-field">
               <label htmlFor="base-url">{t('createBaseUrl')}</label>
               <input
@@ -329,7 +330,7 @@ export default function AgentCreateForm() {
                 type="text"
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="http://localhost:11434"
+                placeholder={provider === 'openai' ? 'https://api.openai.com/v1' : 'http://localhost:11434'}
               />
               {renderFieldErrors('model.base_url')}
             </div>

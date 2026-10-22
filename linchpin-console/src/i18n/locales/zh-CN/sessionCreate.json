@@ -10,6 +10,7 @@
   "ttlPlaceholder": "例如 3600",
   "ttlHint": "空闲会话将在该秒数后被回收，至少为 1。",
   "vaultsOptional": "凭据保险库（可选）",
+  "vaultsHint": "勾选的保险库有两类用途：为会话中的 MCP 服务提供凭据，以及为智能体模型供应商解析 API 密钥。",
   "noVaults": "暂无可用保险库",
   "mountsOptional": "资源挂载（可选）",
   "fileUploaded": "文件（已上传）",

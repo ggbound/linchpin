@@ -32,6 +32,7 @@
   "detailProvider": "供应商",
   "detailApiKey": "API 密钥",
   "detailApiKeyPlaceholder": "API 密钥",
+  "detailApiKeyHint": "该密钥用于所选供应商的大模型接口调用：创建会话时勾选本保险库后，运行时才会按供应商匹配并注入密钥（未勾选且未设置环境变量时，会话将因缺少凭据而失败）。",
   "detailKek": "KEK（Fernet 密钥）",
   "detailKekPlaceholder": "例如：gAAAAA...（Fernet.generate_key()）",
   "detailAccessToken": "Access Token",

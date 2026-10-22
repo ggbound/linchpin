@@ -260,6 +260,7 @@ export default function AgentDetailView() {
                 data-testid="edit-provider-select"
               >
                 <option value="openrouter">OpenRouter</option>
+                <option value="openai">OpenAI</option>
                 <option value="ollama">Ollama</option>
               </select>
             </div>
@@ -273,7 +274,7 @@ export default function AgentDetailView() {
                 data-testid="edit-model-id-input"
               />
             </div>
-            {editProvider === 'ollama' && (
+            {(editProvider === 'openai' || editProvider === 'ollama') && (
               <div className="edit-field">
                 <label htmlFor="edit-base-url">{t('detailBaseUrl')}</label>
                 <input
@@ -281,7 +282,7 @@ export default function AgentDetailView() {
                   type="text"
                   value={editBaseUrl}
                   onChange={(e) => setEditBaseUrl(e.target.value)}
-                  placeholder="http://localhost:11434"
+                  placeholder={editProvider === 'openai' ? 'https://api.openai.com/v1' : 'http://localhost:11434'}
                   data-testid="edit-base-url-input"
                 />
               </div>

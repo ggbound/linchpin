@@ -1,11 +1,11 @@
 # Model gateway (LiteLLM)
 
-Linchpin's model layer intentionally ships **only two provider adapters**:
-`openrouter` (OpenAI-compatible HTTP) and `ollama`. Instead of adding one
-adapter per vendor, any other OpenAI-compatible upstream — a LiteLLM gateway,
-a self-hosted vLLM/TGI deployment, or your own fine-tuned model served behind
-an OpenAI-style API — is reached through the **same `openrouter` adapter with a
-`base_url` override**.
+Linchpin's model layer ships a small set of provider adapters: `openrouter`
+(OpenAI-compatible HTTP), `openai` (direct OpenAI API), and `ollama`. Instead
+of adding one adapter per vendor, any other OpenAI-compatible upstream — a
+LiteLLM gateway, a self-hosted vLLM/TGI deployment, or your own fine-tuned
+model served behind an OpenAI-style API — is reached through the **same
+`openrouter` adapter with a `base_url` override**.
 
 ```
 agent.model = { provider: "openrouter", id: "<model-id>", base_url: "<gateway>" }
@@ -58,6 +58,7 @@ Credential resolution is keyed off the **provider string, not the endpoint**
 | Channel | `provider` | Env fallback | Vault credential |
 |---|---|---|---|
 | Direct OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `provider="openrouter"`, `api_key=<sk-or-...>` |
+| Direct OpenAI | `openai` | `OPENAI_API_KEY` | `provider="openai"`, `api_key=<sk-...>` |
 | Via LiteLLM gateway | `openrouter` | `OPENROUTER_API_KEY` | `provider="openrouter"`, `api_key=<LITELLM_MASTER_KEY or virtual key>` |
 | Direct Ollama | `ollama` | none needed | — |
 
@@ -97,6 +98,16 @@ Then point the agent at it: `provider: "openrouter"`, `id: "my-model"`,
 For a single fixed endpoint you may also bypass the gateway entirely: set
 `base_url` directly to your server (`http://vllm:8000/v1`) and store its key as
 a vault credential with `provider="openrouter"` (or in `OPENROUTER_API_KEY`).
+
+## Direct OpenAI
+
+For the OpenAI API itself there is a dedicated adapter: `provider: "openai"`,
+`id: <model-id>` (e.g. `gpt-4o`). The default endpoint is
+`https://api.openai.com/v1`; a `base_url` override redirects it to any
+OpenAI-style endpoint (proxies, gateways). Credentials resolve from a vault
+credential with `provider="openai"` or the `OPENAI_API_KEY` env var — the same
+flow as OpenRouter. Unlike `openrouter`, the adapter sends no
+`HTTP-Referer` / `X-Title` headers.
 
 ## Ollama
 

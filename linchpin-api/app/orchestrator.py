@@ -1289,6 +1289,7 @@ async def _run_session_loop(
             # the request. See docs/model-gateway.md.
             env_var_map = {
                 "openrouter": "OPENROUTER_API_KEY",
+                "openai": "OPENAI_API_KEY",
             }
             env_var_name = env_var_map.get(agent.model.provider)
             env_key = os.environ.get(env_var_name, "") if env_var_name else ""
