@@ -1,10 +1,11 @@
 """Atlas C1 — multi-tenancy admin endpoints.
 
-GET   /v1/projects              — list projects in the caller's org
-PATCH /v1/projects/{id}         — update project quotas (bootstrap key only)
-POST  /v1/api-keys              — issue a key (plaintext returned ONCE)
-GET   /v1/api-keys              — list keys for the caller's project
-DELETE /v1/api-keys/{id}        — revoke a key (soft: status='revoked')
+GET    /v1/projects              — list projects in the caller's org
+POST   /v1/projects              — create a project (bootstrap key only)
+PATCH  /v1/projects/{id}         — update project quotas (bootstrap key only)
+POST   /v1/api-keys              — issue a key (plaintext returned ONCE)
+GET    /v1/api-keys              — list keys for the caller's project
+DELETE /v1/api-keys/{id}         — revoke a key (soft: status='revoked')
 
 Key format: ``lpk_`` + 32 bytes of URL-safe entropy. Only the SHA-256
 hash and a 12-character display prefix are persisted, so a leaked DB
@@ -15,19 +16,22 @@ segment after ``/v1/``: ``projects`` / ``api-keys``).
 
 from __future__ import annotations
 
+import re
 import secrets
 import uuid
 
+from asyncpg.exceptions import UniqueViolationError
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.audit import record_audit
 from app.auth import AuthContext, _hash_token, require_auth
-from app.db import execute, fetch_all, fetch_one
+from app.db import execute, fetch_all, fetch_one, set_tenant_context
 from app.models import (
     ApiKeyCreatedResponse,
     ApiKeyResponse,
     CreateApiKeyRequest,
+    CreateProjectRequest,
     ProjectResponse,
     UpdateProjectRequest,
 )
@@ -75,6 +79,75 @@ async def list_projects(ctx: AuthContext = Depends(require_auth)):
         uuid.UUID(ctx.org_id),
     )
     return [_row_to_project(r) for r in rows]
+
+
+def _derive_slug(name: str) -> str:
+    """Derive a kebab-case slug from *name*.
+
+    Names that transliterate to nothing (e.g. pure CJK) fall back to
+    random hex — callers who care about a readable slug should pass one
+    explicitly.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return slug[:64].strip("-") or uuid.uuid4().hex[:12]
+
+
+@router.post("/projects", status_code=201, response_model=ProjectResponse)
+async def create_project(
+    body: CreateProjectRequest,
+    ctx: AuthContext = Depends(require_auth),
+) -> ProjectResponse:
+    """Create a project in the caller's organization (bootstrap key only).
+
+    Completes the pure-API provisioning flow: create a project, then
+    bind keys to it via ``POST /v1/api-keys``. Bootstrap-only for the
+    same reason as the PATCH quotas route — a tenant key must not grow
+    its own tenant tree.
+    """
+    if ctx.api_key_id is not None:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "forbidden",
+                "message": "Project creation requires the bootstrap API key",
+            },
+        )
+
+    slug = body.slug if body.slug is not None else _derive_slug(body.name)
+
+    try:
+        row = await fetch_one(
+            """
+            INSERT INTO projects (org_id, name, slug,
+                                  max_concurrent_sessions, monthly_token_budget)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING *
+            """,
+            uuid.UUID(ctx.org_id),
+            body.name,
+            slug,
+            body.max_concurrent_sessions,
+            body.monthly_token_budget,
+        )
+    except UniqueViolationError:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "conflict",
+                "message": f"Slug '{slug}' already exists in this organization",
+            },
+        )
+    assert row is not None  # INSERT ... RETURNING always yields the row
+    await record_audit(
+        "project.created", "project", str(row["id"]), ctx=ctx,
+        detail={
+            "name": body.name,
+            "slug": slug,
+            "max_concurrent_sessions": body.max_concurrent_sessions,
+            "monthly_token_budget": body.monthly_token_budget,
+        },
+    )
+    return _row_to_project(row)
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)
@@ -189,19 +262,32 @@ async def create_api_key(
     prefix = plaintext[:12]
     scopes = body.scopes if body.scopes is not None else ["*"]
 
-    row = await fetch_one(
-        """
-        INSERT INTO api_keys (project_id, name, key_hash, prefix, scopes, rate_limit_rpm)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING *
-        """,
-        project_uid,
-        body.name,
-        key_hash,
-        prefix,
-        scopes,
-        body.rate_limit_rpm,
-    )
+    # Cross-project issuance (the bootstrap key provisioning a fresh
+    # tenant via POST /v1/projects) trips api_keys RLS: the caller's GUC
+    # pins a different project, so the WITH CHECK rejects the INSERT.
+    # The org-ownership check above is the real guard, so drop the GUC
+    # for this write — the same fail-open semantics migration 0030
+    # grants to pre-auth/background queries — and restore it right after.
+    cross_project = project_uid != uuid.UUID(ctx.project_id)
+    if cross_project:
+        set_tenant_context(None)
+    try:
+        row = await fetch_one(
+            """
+            INSERT INTO api_keys (project_id, name, key_hash, prefix, scopes, rate_limit_rpm)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING *
+            """,
+            project_uid,
+            body.name,
+            key_hash,
+            prefix,
+            scopes,
+            body.rate_limit_rpm,
+        )
+    finally:
+        if cross_project:
+            set_tenant_context(ctx.project_id)
     await record_audit(
         "api_key.created", "api_key", str(row["id"]), ctx=ctx,
         detail={

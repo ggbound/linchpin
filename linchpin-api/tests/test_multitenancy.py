@@ -13,6 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import asyncpg
 import pytest
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
@@ -325,6 +326,58 @@ def test_create_api_key_unknown_project_404(client):
     assert resp.status_code == 404
 
 
+def test_create_api_key_cross_project_drops_tenant_guc(client):
+    """Bootstrap provisioning a fresh project (the POST /v1/projects
+    flow): the api_keys INSERT must run with the tenant GUC dropped
+    (RLS fail-open, same semantics as pre-auth queries) and be restored
+    to the caller's project right after."""
+    other_project = str(uuid.uuid4())
+    guc_calls = []
+
+    async def _fetch_one_side(sql, *args):
+        if "FROM projects" in sql:
+            return {"org_id": uuid.UUID(DEFAULT_TENANT)}  # ownership check
+        return _apikey_db_row()  # INSERT ... RETURNING
+
+    with (
+        patch("app.routes.admin.fetch_one", new_callable=AsyncMock, side_effect=_fetch_one_side),
+        patch("app.routes.admin.set_tenant_context", side_effect=lambda v: guc_calls.append(v)),
+        patch("app.routes.admin.record_audit", new_callable=AsyncMock),
+    ):
+        resp = client.post(
+            "/v1/api-keys",
+            json={"name": "u", "project_id": other_project},
+            headers={"Authorization": "Bearer test-secret-key"},
+        )
+
+    assert resp.status_code == 201
+    assert [(str(v) if v else v) for v in guc_calls] == [None, DEFAULT_TENANT]
+
+
+def test_create_api_key_same_project_keeps_tenant_guc(client):
+    """Same-project issuance takes the RLS-safe path — no GUC juggling."""
+    guc_calls = []
+
+    async def _fetch_one_side(sql, *args):
+        if "FROM projects" in sql:
+            return {"org_id": uuid.UUID(DEFAULT_TENANT)}
+        return _apikey_db_row()
+
+    with (
+        patch("app.routes.admin.fetch_one", new_callable=AsyncMock, side_effect=_fetch_one_side),
+        patch("app.routes.admin.set_tenant_context", side_effect=lambda v: guc_calls.append(v)),
+        patch("app.routes.admin.record_audit", new_callable=AsyncMock),
+    ):
+        resp = client.post(
+            "/v1/api-keys",
+            json={"name": "u"},
+            headers={"Authorization": "Bearer test-secret-key"},
+        )
+
+    assert resp.status_code == 201
+    assert guc_calls == []
+
+
 def test_list_api_keys_never_returns_secret_material(client):
     with patch(
         "app.routes.admin.fetch_all", new_callable=AsyncMock,
@@ -366,6 +419,151 @@ def test_revoke_api_key_malformed_id_404(client):
         headers={"Authorization": "Bearer test-secret-key"},
     )
     assert resp.status_code == 404
+
+
+# --- project creation (Atlas C1, POST /v1/projects) ---------------------------
+
+
+def test_create_project_issued_key_forbidden(client):
+    """Project creation is bootstrap-only (same rule as PATCH quotas) —
+    an issued key gets 403 even with full scopes."""
+    token = "lpk_" + uuid.uuid4().hex
+    row, _ = _api_key_row(token=token, scopes=("*",))
+    with (
+        patch("app.auth.fetch_one", new_callable=AsyncMock, return_value=row),
+        patch("app.auth.execute", new_callable=AsyncMock),
+    ):
+        resp = client.post(
+            "/v1/projects",
+            json={"name": "User 1024"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 403
+    body = resp.json()
+    assert body["error"] == "forbidden"
+    assert "bootstrap" in body["message"]
+
+
+def test_create_project_derives_slug_and_audits(client):
+    captured = {}
+
+    async def _fetch_one_side(sql, *args):
+        captured["sql"] = " ".join(sql.split())
+        captured["args"] = list(args)
+        row = _project_row()
+        row["id"] = uuid.uuid4()
+        row["name"] = args[1]
+        row["slug"] = args[2]
+        return row
+
+    with (
+        patch("app.routes.admin.fetch_one", new_callable=AsyncMock, side_effect=_fetch_one_side),
+        patch("app.routes.admin.record_audit", new_callable=AsyncMock) as audit,
+    ):
+        resp = client.post(
+            "/v1/projects",
+            json={"name": "User 1024 Workspace"},
+            headers={"Authorization": "Bearer test-secret-key"},
+        )
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["slug"] == "user-1024-workspace"
+    assert body["max_concurrent_sessions"] is None
+    assert body["monthly_token_budget"] is None
+    assert "INSERT INTO projects" in captured["sql"]
+    # Bootstrap key's org (the default tenant) owns the new project.
+    assert str(captured["args"][0]) == DEFAULT_TENANT
+    assert captured["args"][1] == "User 1024 Workspace"
+    audit.assert_awaited_once()
+    assert audit.await_args.args[0] == "project.created"
+    assert audit.await_args.args[2] == body["id"]
+
+
+def test_create_project_explicit_slug_and_quotas(client):
+    async def _fetch_one_side(sql, *args):
+        row = _project_row()
+        row["slug"] = args[2]
+        row["max_concurrent_sessions"] = args[3]
+        row["monthly_token_budget"] = args[4]
+        return row
+
+    with (
+        patch("app.routes.admin.fetch_one", new_callable=AsyncMock, side_effect=_fetch_one_side),
+        patch("app.routes.admin.record_audit", new_callable=AsyncMock),
+    ):
+        resp = client.post(
+            "/v1/projects",
+            json={
+                "name": "Pro",
+                "slug": "pro-tenant",
+                "max_concurrent_sessions": 4,
+                "monthly_token_budget": 1_000_000,
+            },
+            headers={"Authorization": "Bearer test-secret-key"},
+        )
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["slug"] == "pro-tenant"
+    assert body["max_concurrent_sessions"] == 4
+    assert body["monthly_token_budget"] == 1_000_000
+
+
+def test_create_project_cjk_name_falls_back_to_random_slug(client):
+    async def _fetch_one_side(sql, *args):
+        row = _project_row()
+        row["name"] = args[1]
+        row["slug"] = args[2]
+        return row
+
+    with (
+        patch("app.routes.admin.fetch_one", new_callable=AsyncMock, side_effect=_fetch_one_side),
+        patch("app.routes.admin.record_audit", new_callable=AsyncMock),
+    ):
+        resp = client.post(
+            "/v1/projects",
+            json={"name": "用户专属项目"},
+            headers={"Authorization": "Bearer test-secret-key"},
+        )
+
+    assert resp.status_code == 201
+    # Random-hex fallback: 12 chars, kebab-safe, no empty slug.
+    assert len(resp.json()["slug"]) == 12
+
+
+def test_create_project_slug_conflict_409(client):
+    with patch(
+        "app.routes.admin.fetch_one", new_callable=AsyncMock,
+        side_effect=asyncpg.UniqueViolationError("duplicate key value"),
+    ):
+        resp = client.post(
+            "/v1/projects",
+            json={"name": "Default", "slug": "default"},
+            headers={"Authorization": "Bearer test-secret-key"},
+        )
+    assert resp.status_code == 409
+    body = resp.json()  # unified handler flattens the envelope to top level
+    assert body["error"] == "conflict"
+    assert "default" in body["message"]
+
+
+def test_create_project_invalid_slug_422(client):
+    resp = client.post(
+        "/v1/projects",
+        json={"name": "X", "slug": "Not Valid!"},
+        headers={"Authorization": "Bearer test-secret-key"},
+    )
+    assert resp.status_code == 422
+
+
+def test_create_project_empty_name_422(client):
+    resp = client.post(
+        "/v1/projects",
+        json={"name": ""},
+        headers={"Authorization": "Bearer test-secret-key"},
+    )
+    assert resp.status_code == 422
 
 
 # --- project quota management (Atlas M5, PATCH /v1/projects/{id}) -------------

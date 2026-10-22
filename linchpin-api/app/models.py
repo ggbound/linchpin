@@ -2103,6 +2103,26 @@ class UpdateProjectRequest(BaseModel):
     monthly_token_budget: int | None = Field(default=None, ge=1)
 
 
+class CreateProjectRequest(BaseModel):
+    """Body for ``POST /v1/projects`` (bootstrap key only).
+
+    ``slug`` is optional — derived from ``name`` when omitted; must be
+    lowercase kebab-case and unique within the organization (409 on
+    conflict). Quota fields mirror ``UpdateProjectRequest``
+    (``None`` = unlimited).
+    """
+
+    name: str = Field(min_length=1)
+    slug: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+    )
+    max_concurrent_sessions: int | None = Field(default=None, ge=1)
+    monthly_token_budget: int | None = Field(default=None, ge=1)
+
+
 class CreateApiKeyRequest(BaseModel):
     """Body for ``POST /v1/api-keys``.
 
