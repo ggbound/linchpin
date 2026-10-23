@@ -67,7 +67,9 @@ Linchpin 是一个**多租户 Agent 会话控制面（control plane）**，由�
 
 - [docs/error-codes.md](error-codes.md) — 错误码完整定义；
 - [docs/limits.md](limits.md) — 限流与配额的详细语义；
-- [docs/model-gateway.md](model-gateway.md) — 模型网关（Provider 接入）说明。
+- [docs/model-gateway.md](model-gateway.md) — 模型网关（Provider 接入）说明；
+- [docs/vault-credential-guide.md](vault-credential-guide.md) — 凭据保险库专题接入文档（行为导向）；
+- [docs/api-vault-credential-test-cases.md](api-vault-credential-test-cases.md) / [docs/api-vault-credential-test-report.md](api-vault-credential-test-report.md) — vault 凭据链路专项测试用例与执行报告。
 
 ### 1.4 端点分组索引
 
@@ -2387,8 +2389,8 @@ Create a new session: validate refs, provision container, insert record.<br><br>
 | `title` | string \| null | 否 | — | — |
 | `metadata` | object | 否 | — | — |
 | `ttl_seconds` | integer \| null | 否 | — | — |
-| `vault_ids` | string[] | 否 | — | — |
-| `resources` | `FileResource` \| `MemoryStoreResource` \| `GitRepositoryResource` \| `GithubRepositoryResource` \| `VaultResource`[] | 否 | — | — |
+| `vault_ids` | string[] | 否 | — | 绑定凭据保险库；运行时按智能体模型供应商从其中解析 `api_key` 凭据（见第 23 章） |
+| `resources` | `FileResource` \| `MemoryStoreResource` \| `GitRepositoryResource` \| `GithubRepositoryResource` \| `VaultResource`[] | 否 | — | 资源挂载列表；其中 `type="vault"` 条目等效于 `vault_ids` 绑定 |
 | `outcome` | `OutcomeDefinition` \| null | 否 | — | — |
 
 **响应 201**：Successful Response
@@ -2412,7 +2414,7 @@ Create a new session: validate refs, provision container, insert record.<br><br>
 | `ttl_seconds` | integer \| null | 否 | — | — |
 | `stats` | `SessionStats` | 否 | — | — |
 | `usage` | `SessionUsage` | 否 | — | — |
-| `vault_ids` | string[] | 否 | — | — |
+| `vault_ids` | string[] | 否 | — | 绑定的凭据保险库 ID（运行时用于解析模型 API Key 与 MCP 凭据，见第 23 章） |
 | `resources` | `SessionResource`[] | 否 | — | — |
 | `outcome` | `OutcomeDefinition` \| null | 否 | — | — |
 | `parent_session_id` | string \| null | 否 | — | — |
@@ -2454,7 +2456,7 @@ Retrieve a session by id with stats and usage.
 | `ttl_seconds` | integer \| null | 否 | — | — |
 | `stats` | `SessionStats` | 否 | — | — |
 | `usage` | `SessionUsage` | 否 | — | — |
-| `vault_ids` | string[] | 否 | — | — |
+| `vault_ids` | string[] | 否 | — | 绑定的凭据保险库 ID（运行时用于解析模型 API Key 与 MCP 凭据，见第 23 章） |
 | `resources` | `SessionResource`[] | 否 | — | — |
 | `outcome` | `OutcomeDefinition` \| null | 否 | — | — |
 | `parent_session_id` | string \| null | 否 | — | — |
@@ -2500,7 +2502,7 @@ Update session title and/or metadata.
 | `ttl_seconds` | integer \| null | 否 | — | — |
 | `stats` | `SessionStats` | 否 | — | — |
 | `usage` | `SessionUsage` | 否 | — | — |
-| `vault_ids` | string[] | 否 | — | — |
+| `vault_ids` | string[] | 否 | — | 绑定的凭据保险库 ID（运行时用于解析模型 API Key 与 MCP 凭据，见第 23 章） |
 | `resources` | `SessionResource`[] | 否 | — | — |
 | `outcome` | `OutcomeDefinition` \| null | 否 | — | — |
 | `parent_session_id` | string \| null | 否 | — | — |
@@ -2542,7 +2544,7 @@ Terminate a session: set status to terminated, destroy container.
 | `ttl_seconds` | integer \| null | 否 | — | — |
 | `stats` | `SessionStats` | 否 | — | — |
 | `usage` | `SessionUsage` | 否 | — | — |
-| `vault_ids` | string[] | 否 | — | — |
+| `vault_ids` | string[] | 否 | — | 绑定的凭据保险库 ID（运行时用于解析模型 API Key 与 MCP 凭据，见第 23 章） |
 | `resources` | `SessionResource`[] | 否 | — | — |
 | `outcome` | `OutcomeDefinition` \| null | 否 | — | — |
 | `parent_session_id` | string \| null | 否 | — | — |
@@ -2647,7 +2649,7 @@ Spawn a worker thread off ``parent_id``.<br><br>The new session is created via t
 | `title` | string \| null | 否 | — | — |
 | `metadata` | object | 否 | — | — |
 | `ttl_seconds` | integer \| null | 否 | — | — |
-| `vault_ids` | string[] | 否 | — | — |
+| `vault_ids` | string[] | 否 | — | 绑定凭据保险库；运行时按智能体模型供应商从其中解析 `api_key` 凭据（见第 23 章） |
 | `resources` | any[] | 否 | — | — |
 | `input_message` | string \| object \| any[] \| null | 否 | — | — |
 | `outcome` | `OutcomeDefinition` \| null | 否 | — | — |
@@ -2673,7 +2675,7 @@ Spawn a worker thread off ``parent_id``.<br><br>The new session is created via t
 | `ttl_seconds` | integer \| null | 否 | — | — |
 | `stats` | `SessionStats` | 否 | — | — |
 | `usage` | `SessionUsage` | 否 | — | — |
-| `vault_ids` | string[] | 否 | — | — |
+| `vault_ids` | string[] | 否 | — | 绑定的凭据保险库 ID（运行时用于解析模型 API Key 与 MCP 凭据，见第 23 章） |
 | `resources` | `SessionResource`[] | 否 | — | — |
 | `outcome` | `OutcomeDefinition` \| null | 否 | — | — |
 | `parent_session_id` | string \| null | 否 | — | — |
@@ -2715,7 +2717,7 @@ Archive a session: set archived_at.<br><br>Atlas A6 — idempotent: archiving an
 | `ttl_seconds` | integer \| null | 否 | — | — |
 | `stats` | `SessionStats` | 否 | — | — |
 | `usage` | `SessionUsage` | 否 | — | — |
-| `vault_ids` | string[] | 否 | — | — |
+| `vault_ids` | string[] | 否 | — | 绑定的凭据保险库 ID（运行时用于解析模型 API Key 与 MCP 凭据，见第 23 章） |
 | `resources` | `SessionResource`[] | 否 | — | — |
 | `outcome` | `OutcomeDefinition` \| null | 否 | — | — |
 | `parent_session_id` | string \| null | 否 | — | — |
@@ -3080,6 +3082,18 @@ Aggregate token usage for the caller's project.<br><br>Buckets are UTC days by d
 
 ## 23. 凭据保险库（`vaults`）
 
+凭据分三类用途：
+
+| 用途 | credential_type | 目标字段 | 说明 |
+|---|---|---|---|
+| MCP 服务鉴权 | `bearer_token` / `oauth` | `mcp_server_url` | 会话中 MCP 工具调用时按服务地址匹配使用 |
+| 智能体模型调用 | `api_key` | `provider` | 会话创建时绑定保险库后，运行时按 `(vault_id, provider)` 与智能体模型供应商匹配，解密后作为 LLM API Key 注入（详见 [model-gateway.md](model-gateway.md)） |
+| BYOK 加密 | `byok_kek` | — | 客户托管密钥加密密钥（KEK） |
+
+`api_key` 凭据的解析优先级：绑定保险库中的 Vault 凭据 → 环境变量（`OPENROUTER_API_KEY` / `OPENAI_API_KEY`）→ `ollama` 无需密钥；均已缺失且供应商非 `ollama` 时，会话以 `credential_missing` 失败。同一保险库内 `mcp_server_url`（MCP 凭据）或 `provider`（`api_key` 凭据）各自唯一。
+
+> **行为导向专题文档**：[docs/vault-credential-guide.md](vault-credential-guide.md) — 面向接入方的凭据保险库说明（快速上手、BYOK 流程、生命周期语义与实测错误速查表）。本章各端点下标注"实测注记"的行为均已按 0.7.0 专项测试核验（[用例](api-vault-credential-test-cases.md) / [执行报告](api-vault-credential-test-report.md)）。
+
 ### 23.1 GET /v1/vaults
 
 **List Vaults**
@@ -3100,6 +3114,8 @@ Return a paginated list of vaults.
 | `data` | any[] | 是 | — | — |
 | `next_cursor` | string \| null | 否 | — | — |
 | `has_more` | boolean | 否 | 默认 `false` | — |
+
+> **实测注记（0.7.0）**：`next_cursor` 恒为 `null`，游标翻页不可用；实际请用 `limit` / `offset` 翻页，排序为 `created_at` 降序。`offset` 越界返回 200 且 `data == []`、`has_more == false`。
 
 **错误**：422 参数校验失败 · 401 未认证 · 429 限流/配额超限 · 500 服务器内部错误（完整定义见第 6 章「通用约定」与 [error-codes.md](error-codes.md)）。
 
@@ -3154,6 +3170,8 @@ Retrieve a vault by id.
 
 **错误**：422 参数校验失败 · 401 未认证 · 429 限流/配额超限 · 500 服务器内部错误（完整定义见第 6 章「通用约定」与 [error-codes.md](error-codes.md)）。
 
+> **实测注记（0.7.0）**：路径 `vault_id` 非法 UUID 返回 **404**（非 422），message 形如 `"Vault not-a-uuid not found"`；跨项目访问同样 404（与"不存在"同文案，不泄露存在性）。对照：会话绑定 `vault_ids` 中的非法 UUID 返回 422（见 20.2）。
+
 ### 23.4 DELETE /v1/vaults/{vault_id}
 
 **Delete Vault**
@@ -3169,6 +3187,8 @@ Delete a vault and all its credentials (cascade).
 **响应 204**：Successful Response
 
 无响应体。
+
+> **实测注记（0.7.0）**：删除会级联**物理删除**其下全部凭据；**已归档的 vault 也可直接删除**（同样 204）；重复删除返回 404 `"Vault {id} not found"`。
 
 **错误**：422 参数校验失败 · 401 未认证 · 429 限流/配额超限 · 500 服务器内部错误（完整定义见第 6 章「通用约定」与 [error-codes.md](error-codes.md)）。
 
@@ -3194,6 +3214,8 @@ Archive a vault: set archived_at, purge credential secrets.
 | `created_at` | string(date-time) | 是 | — | — |
 | `updated_at` | string(date-time) | 是 | — | — |
 | `archived_at` | string(date-time) \| null | 否 | — | — |
+
+> **实测注记（0.7.0）**：归档事务同步**级联归档其下全部凭据并清空其密文**；重复归档返回 409 `"Vault {id} is already archived"`；归档后不再接受新建凭据（409 `"Vault {id} is archived"`），但仍可直接 DELETE（204，见 23.4）。
 
 **错误**：422 参数校验失败 · 401 未认证 · 429 限流/配额超限 · 500 服务器内部错误（完整定义见第 6 章「通用约定」与 [error-codes.md](error-codes.md)）。
 
@@ -3238,9 +3260,41 @@ Create a credential within a vault.
 |---|---|---|
 | `vault_id` | string | — |
 
-**请求体**（必填）
+**请求体**（必填，按 `credential_type` 判别，4 种变体）
 
-结构 `Body`（无展开字段，见附录）。
+**`credential_type="bearer_token"`**（MCP 服务令牌）
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `credential_type` | string | 是 | 固定 `"bearer_token"` |
+| `mcp_server_url` | string | 是 | MCP 服务地址（同一保险库内唯一） |
+| `token` | string | 是 | Bearer 令牌 |
+
+**`credential_type="api_key"`**（智能体模型供应商密钥）
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `credential_type` | string | 是 | 固定 `"api_key"` |
+| `provider` | string | 是 | 枚举 `"openrouter"` / `"openai"` / `"ollama"`（同一保险库内唯一） |
+| `api_key` | string | 是 | 供应商 API Key，Fernet 加密存储 |
+
+**`credential_type="oauth"`**（MCP 服务 OAuth）
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `credential_type` | string | 是 | 固定 `"oauth"` |
+| `mcp_server_url` | string | 是 | MCP 服务地址（同一保险库内唯一） |
+| `access_token` | string | 是 | 访问令牌 |
+| `refresh_token` | string | 否 | 刷新令牌 |
+| `client_id` | string | 否 | 客户端 ID |
+| `client_secret` | string | 否 | 客户端密钥 |
+
+**`credential_type="byok_kek"`**（客户托管 KEK）
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `credential_type` | string | 是 | 固定 `"byok_kek"` |
+| `kek` | string | 是 | Fernet 密钥（base64 编码的 32 字节），用于包裹会话数据密钥 |
 
 **响应 201**：Successful Response
 
@@ -3250,11 +3304,18 @@ Create a credential within a vault.
 | `vault_id` | string | 是 | — | — |
 | `credential_type` | string | 是 | 枚举 `"bearer_token"` / `"api_key"` / `"oauth"` / `"byok_kek"` | — |
 | `mcp_server_url` | string \| null | 否 | — | — |
-| `provider` | string \| null | 否 | 枚举 `"openrouter"` / `"ollama"` | — |
+| `provider` | string \| null | 否 | 枚举 `"openrouter"` / `"openai"` / `"ollama"` | — |
 | `client_id` | string \| null | 否 | — | — |
 | `created_at` | string(date-time) | 是 | — | — |
 | `updated_at` | string(date-time) | 是 | — | — |
 | `archived_at` | string(date-time) \| null | 否 | — | — |
+
+**实测错误行为（0.7.0）**：
+
+- **422（请求体校验）**：判别联合的 `loc` 带 discriminator 段——非法 `provider` 报 `loc == ["body", "api_key", "provider"]`、`type == "literal_error"`、`msg == "Input should be 'openrouter', 'openai' or 'ollama'"`；非法 `kek` 报 `loc == ["body", "byok_kek", "kek"]`、`msg == "Value error, kek is not a valid Fernet key: Fernet key must be 32 url-safe base64-encoded bytes."`（校验先于入库，DB 无残留行）。
+- **409（唯一性冲突）**：同 vault 内重复 `provider` / `mcp_server_url` 返回 `{"error":"conflict","message":"A credential for '{target}' already exists in vault {vault_id}","detail":null}`（`target` 取 `mcp_server_url or provider`）；唯一性作用域为同 vault 内，跨 vault 同值允许。
+- **409（数量上限）**：单 vault 未归档凭据达 20 个后再建返回 409 `"Vault {vault_id} already has 20 active credentials"`（上限按未归档计数，归档可腾出名额）。
+- **409（vault 已归档）**：向已归档 vault 创建凭据返回 409 `"Vault {vault_id} is archived"`。
 
 **错误**：422 参数校验失败 · 401 未认证 · 429 限流/配额超限 · 500 服务器内部错误（完整定义见第 6 章「通用约定」与 [error-codes.md](error-codes.md)）。
 
@@ -3279,7 +3340,7 @@ Retrieve a credential by id (secrets omitted).
 | `vault_id` | string | 是 | — | — |
 | `credential_type` | string | 是 | 枚举 `"bearer_token"` / `"api_key"` / `"oauth"` / `"byok_kek"` | — |
 | `mcp_server_url` | string \| null | 否 | — | — |
-| `provider` | string \| null | 否 | 枚举 `"openrouter"` / `"ollama"` | — |
+| `provider` | string \| null | 否 | 枚举 `"openrouter"` / `"openai"` / `"ollama"` | — |
 | `client_id` | string \| null | 否 | — | — |
 | `created_at` | string(date-time) | 是 | — | — |
 | `updated_at` | string(date-time) | 是 | — | — |
@@ -3311,6 +3372,8 @@ Update secret fields on a credential.
 | `client_secret` | string \| null | 否 | — | — |
 | `kek` | string \| null | 否 | — | — |
 
+> ⚠️ **实测行为警示（0.7.0）**：PATCH 是对 `encrypted_secrets` 的**整体替换而非字段合并**——请求中未带的密文字段会被**静默清空**（例如仅 PATCH `access_token` 会使原 `refresh_token` 丢失，DB 解密复核已证实）。轮换密钥时请在单次请求中带上**全部**需保留的密文字段。空体 `{}` 原样返回且 `updated_at` 不变；已归档凭据返回 409 `"Credential {id} is archived"`。
+
 **响应 200**：Successful Response
 
 | 字段 | 类型 | 必填 | 约束 / 默认 | 说明 |
@@ -3319,7 +3382,7 @@ Update secret fields on a credential.
 | `vault_id` | string | 是 | — | — |
 | `credential_type` | string | 是 | 枚举 `"bearer_token"` / `"api_key"` / `"oauth"` / `"byok_kek"` | — |
 | `mcp_server_url` | string \| null | 否 | — | — |
-| `provider` | string \| null | 否 | 枚举 `"openrouter"` / `"ollama"` | — |
+| `provider` | string \| null | 否 | 枚举 `"openrouter"` / `"openai"` / `"ollama"` | — |
 | `client_id` | string \| null | 否 | — | — |
 | `created_at` | string(date-time) | 是 | — | — |
 | `updated_at` | string(date-time) | 是 | — | — |
@@ -3344,6 +3407,8 @@ Delete a credential.
 
 无响应体。
 
+> **实测注记（0.7.0）**：DELETE 不过滤已归档凭据——已归档凭据同样可物理删除（204）。
+
 **错误**：422 参数校验失败 · 401 未认证 · 429 限流/配额超限 · 500 服务器内部错误（完整定义见第 6 章「通用约定」与 [error-codes.md](error-codes.md)）。
 
 ### 23.11 POST /v1/vaults/{vault_id}/credentials/{credential_id}/archive
@@ -3367,11 +3432,13 @@ Archive a credential: set archived_at, purge encrypted secrets.
 | `vault_id` | string | 是 | — | — |
 | `credential_type` | string | 是 | 枚举 `"bearer_token"` / `"api_key"` / `"oauth"` / `"byok_kek"` | — |
 | `mcp_server_url` | string \| null | 否 | — | — |
-| `provider` | string \| null | 否 | 枚举 `"openrouter"` / `"ollama"` | — |
+| `provider` | string \| null | 否 | 枚举 `"openrouter"` / `"openai"` / `"ollama"` | — |
 | `client_id` | string \| null | 否 | — | — |
 | `created_at` | string(date-time) | 是 | — | — |
 | `updated_at` | string(date-time) | 是 | — | — |
 | `archived_at` | string(date-time) \| null | 否 | — | — |
+
+> **实测注记（0.7.0）**：归档置 `archived_at` 并清空密文；重复归档返回 409 `"Credential {id} is already archived"`；归档后 PATCH 返回 409 `"Credential {id} is archived"`；GET 与 DELETE 不过滤已归档（GET 仍 200、DELETE 仍 204）。vault 归档会级联归档其下全部凭据（见 23.5）。
 
 **错误**：422 参数校验失败 · 401 未认证 · 429 限流/配额超限 · 500 服务器内部错误（完整定义见第 6 章「通用约定」与 [error-codes.md](error-codes.md)）。
 
@@ -3728,8 +3795,8 @@ POST /v1/sessions request body.
 | `title` | string \| null | 否 | — | — |
 | `metadata` | object | 否 | — | — |
 | `ttl_seconds` | integer \| null | 否 | — | — |
-| `vault_ids` | string[] | 否 | — | — |
-| `resources` | `FileResource` \| `MemoryStoreResource` \| `GitRepositoryResource` \| `GithubRepositoryResource` \| `VaultResource`[] | 否 | — | — |
+| `vault_ids` | string[] | 否 | — | 绑定凭据保险库；运行时按智能体模型供应商从其中解析 `api_key` 凭据（见第 23 章） |
+| `resources` | `FileResource` \| `MemoryStoreResource` \| `GitRepositoryResource` \| `GithubRepositoryResource` \| `VaultResource`[] | 否 | — | 资源挂载列表；其中 `type="vault"` 条目等效于 `vault_ids` 绑定 |
 | `outcome` | `OutcomeDefinition` \| null | 否 | — | — |
 
 ### 26.17 `CreateVaultRequest`
@@ -3759,7 +3826,7 @@ Credential resource returned by the API (all secret fields omitted).
 | `vault_id` | string | 是 | — | — |
 | `credential_type` | string | 是 | 枚举 `"bearer_token"` / `"api_key"` / `"oauth"` / `"byok_kek"` | — |
 | `mcp_server_url` | string \| null | 否 | — | — |
-| `provider` | string \| null | 否 | 枚举 `"openrouter"` / `"ollama"` | — |
+| `provider` | string \| null | 否 | 枚举 `"openrouter"` / `"openai"` / `"ollama"` | — |
 | `client_id` | string \| null | 否 | — | — |
 | `created_at` | string(date-time) | 是 | — | — |
 | `updated_at` | string(date-time) | 是 | — | — |
@@ -4060,7 +4127,7 @@ LLM provider configuration.
 
 | 字段 | 类型 | 必填 | 约束 / 默认 | 说明 |
 |---|---|---|---|---|
-| `provider` | string | 是 | 枚举 `"openrouter"` / `"ollama"` | — |
+| `provider` | string | 是 | 枚举 `"openrouter"` / `"openai"` / `"ollama"` | — |
 | `id` | string | 是 | — | — |
 | `base_url` | string \| null | 否 | — | — |
 | `context_window` | integer \| null | 否 | — | — |
@@ -4195,7 +4262,7 @@ Full session resource returned by the API.
 | `ttl_seconds` | integer \| null | 否 | — | — |
 | `stats` | `SessionStats` | 否 | — | — |
 | `usage` | `SessionUsage` | 否 | — | — |
-| `vault_ids` | string[] | 否 | — | — |
+| `vault_ids` | string[] | 否 | — | 绑定的凭据保险库 ID（运行时用于解析模型 API Key 与 MCP 凭据，见第 23 章） |
 | `resources` | `SessionResource`[] | 否 | — | — |
 | `outcome` | `OutcomeDefinition` \| null | 否 | — | — |
 | `parent_session_id` | string \| null | 否 | — | — |
@@ -4362,7 +4429,7 @@ MCP server reached over HTTP-streamable transport (v0.5.0).<br><br>Auth flows th
 | `type` | string | 是 | 固定值 `"url"` | — |
 | `name` | string | 是 | — | — |
 | `url` | string | 是 | — | — |
-| `vault_ids` | string[] | 否 | — | — |
+| `vault_ids` | string[] | 否 | — | 绑定的凭据保险库 ID（运行时用于解析模型 API Key 与 MCP 凭据，见第 23 章） |
 
 ### 26.69 `UsageBucket`
 
@@ -4459,7 +4526,7 @@ Body shape for ``POST /v1/sessions/{parent_id}/threads``.<br><br>Most fields sha
 | `title` | string \| null | 否 | — | — |
 | `metadata` | object | 否 | — | — |
 | `ttl_seconds` | integer \| null | 否 | — | — |
-| `vault_ids` | string[] | 否 | — | — |
+| `vault_ids` | string[] | 否 | — | 绑定的凭据保险库 ID（运行时用于解析模型 API Key 与 MCP 凭据，见第 23 章） |
 | `resources` | any[] | 否 | — | — |
 | `input_message` | string \| object \| any[] \| null | 否 | — | — |
 | `outcome` | `OutcomeDefinition` \| null | 否 | — | — |
