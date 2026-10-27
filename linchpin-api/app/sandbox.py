@@ -576,7 +576,18 @@ class DockerSandbox:
             container = await asyncio.to_thread(
                 self._client.containers.get, container_id
             )
-            bits, _stat = await asyncio.to_thread(container.get_archive, path)
+            bits, stat = await asyncio.to_thread(container.get_archive, path)
+
+            # The X-Docker-Container-Path-Stat header arrives before the tar
+            # body, so a directory target can be rejected without streaming
+            # (and tarring up) the whole subtree first. Go's FileMode marks
+            # directories with 1<<31; some stat shapes expose raw Unix
+            # S_IFDIR bits instead — accept either.
+            mode = stat.get("mode", 0) if isinstance(stat, dict) else 0
+            if (mode & 0o170000) == 0o040000 or (mode & (1 << 31)) != 0:
+                raise SandboxError(
+                    f"Cannot read '{path}': is a directory, not a regular file"
+                )
 
             # bits is a generator of chunks; reassemble and extract
             raw = b"".join(bits)

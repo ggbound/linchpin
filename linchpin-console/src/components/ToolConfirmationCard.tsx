@@ -7,19 +7,24 @@ import './ToolConfirmationCard.css';
 interface ToolConfirmationCardProps {
   sessionId: string;
   toolName: string;
+  toolUseId: string;
   arguments: Record<string, unknown>;
   onResolved: () => void;
+  /** Already answered elsewhere (e.g. replayed from history) — render as resolved. */
+  initiallyResolved?: boolean;
 }
 
 export default function ToolConfirmationCard({
   sessionId,
   toolName,
+  toolUseId,
   arguments: toolArgs,
   onResolved,
+  initiallyResolved = false,
 }: ToolConfirmationCardProps) {
   const { t } = useTranslation('toolConfirm');
   const [sending, setSending] = useState(false);
-  const [resolved, setResolved] = useState(false);
+  const [resolved, setResolved] = useState(initiallyResolved);
   const [error, setError] = useState<string | null>(null);
 
   const sendConfirmation = async (approved: boolean) => {
@@ -32,7 +37,10 @@ export default function ToolConfirmationCard({
         events: [
           {
             type: 'user.tool_confirmation',
-            payload: { approved },
+            payload: {
+              tool_use_id: toolUseId,
+              result: approved ? 'approve' : 'deny',
+            },
           },
         ],
       };

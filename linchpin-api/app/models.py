@@ -45,6 +45,7 @@ EVENT_TYPES: frozenset[str] = frozenset({
     "session.status_rescheduled",
     "session.status_terminated",
     "session.status",                 # Atlas A2 — unified status transition event
+    "session.takeover",               # Atlas M4 (FR-4.6) — lease supervisor resumed a stale replica
     "session.error",
     "session.requires_action",
     "session.resource_mount_failed",  # PR3 — D5
@@ -90,6 +91,7 @@ EventType = Literal[
     "session.status_rescheduled",
     "session.status_terminated",
     "session.status",
+    "session.takeover",
     "session.error",
     "session.requires_action",
     "session.resource_mount_failed",

@@ -53,6 +53,7 @@
   "detailNoArtifacts": "该会话没有产生任何产物。",
   "detailColumnFilename": "文件名",
   "detailColumnSize": "大小",
+  "detailColumnSource": "来源",
   "detailOutcomeEvaluations": "结果评估 ({{total}})",
   "detailRecordEvaluation": "记录评估",
   "detailScoreLabel": "分数 (0–1)",

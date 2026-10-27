@@ -22,6 +22,9 @@ FROM debian:trixie-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
 
+# Resilient package downloads on flaky networks (retries + longer timeouts).
+RUN printf 'Acquire::Retries "10";\nAcquire::http::Timeout "60";\nAcquire::https::Timeout "60";\n' > /etc/apt/apt.conf.d/80-retries
+
 # --- Base system + everything available from apt -----------------------------
 # Single RUN keeps the image layer count down; the apt-list trim at the end
 # saves ~50MB.

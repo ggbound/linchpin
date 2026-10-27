@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: linchpin
       POSTGRES_PASSWORD: linchpin
@@ -18,6 +19,7 @@ services:
   linchpin-api:
     build:
       context: ./linchpin-api
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
@@ -33,6 +35,12 @@ services:
       LINCHPIN_EGRESS_PROXY_IMAGE: ${LINCHPIN_EGRESS_PROXY_IMAGE:-ubuntu/squid:24.04_stable}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Deliverables chain: sandboxes bind-mount this same daemon-resolved VM
+      # path (see ResourceMount host_path), so the API must see the identical
+      # directory — not its own writable layer — for the outputs watcher to
+      # observe agent-written files. Do not use a Windows-host relative path
+      # here: on Docker Desktop the sandbox bind SRC is resolved inside the VM.
+      - /var/lib/linchpin/files:/var/lib/linchpin/files
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,6 +48,7 @@ services:
   linchpin-connector:
     build:
       context: ./linchpin-connector
+    restart: unless-stopped
     ports:
       - "8001:8001"
     environment:
@@ -50,6 +59,7 @@ services:
       context: ./linchpin-console
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    restart: unless-stopped
     ports:
       - "3000:80"
     depends_on:

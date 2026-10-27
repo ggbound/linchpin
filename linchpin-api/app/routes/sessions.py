@@ -1792,6 +1792,23 @@ async def terminate_session(
     except (ValueError, IndexError):
         events_deleted = -1
 
+    # The stats JSONB and last_event_cursor are denormalized projections of
+    # the event stream maintained by append_event; the purge above removed
+    # their source rows, so reset them too — the session row is kept by
+    # design and would otherwise forever report counts for events that no
+    # longer exist. The ``||`` merge preserves any future stats keys.
+    updated = await fetch_one(
+        """UPDATE sessions
+           SET stats = stats
+                 || '{"total_events": 0, "tool_calls": 0, "model_turns": 0}'::jsonb,
+               last_event_cursor = NULL,
+               updated_at = now()
+           WHERE id = $1 AND project_id = $2
+           RETURNING *""",
+        uid,
+        project_uid,
+    )
+
     scoped_files = await fetch_all(
         """SELECT id, storage_path FROM files
            WHERE scope_type = 'session' AND scope_id = $1""",

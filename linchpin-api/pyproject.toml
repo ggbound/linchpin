@@ -21,6 +21,7 @@ dependencies = [
     "prometheus-fastapi-instrumentator>=7.0.0",
     "opentelemetry-sdk>=1.30.0",
     "opentelemetry-exporter-otlp-proto-http>=1.30.0",
+    "croniter>=2.0.0",
 ]
 
 [project.optional-dependencies]

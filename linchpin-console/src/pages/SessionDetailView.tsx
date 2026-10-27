@@ -128,9 +128,10 @@ export default function SessionDetailView() {
   const [renameValue, setRenameValue] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
 
-  // Threads / artifacts
+  // Threads / artifacts / deliverables
   const [threads, setThreads] = useState<Session[] | null>(null);
   const [artifacts, setArtifacts] = useState<FileRecord[] | null>(null);
+  const [deliverables, setDeliverables] = useState<FileRecord[] | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   // Outcome evaluations (grader results)
@@ -169,6 +170,7 @@ export default function SessionDetailView() {
     setLoading(true);
     setThreads(null);
     setArtifacts(null);
+    setDeliverables(null);
     setEvaluations(null);
     setFsPath('/');
     setFsListing(null);
@@ -181,6 +183,10 @@ export default function SessionDetailView() {
       .get<PaginatedResponse<FileRecord>>(`/v1/artifacts?session_id=${id}&limit=100`)
       .then((res) => setArtifacts(res.data))
       .catch(() => setArtifacts([]));
+    apiClient
+      .get<PaginatedResponse<FileRecord>>(`/v1/files?scope_id=${id}&limit=100`)
+      .then((res) => setDeliverables(res.data))
+      .catch(() => setDeliverables([]));
     apiClient
       .get<OutcomeEvaluationsResponse>(`/v1/sessions/${id}/outcome_evaluations`)
       .then((res) => setEvaluations(res.data))
@@ -320,7 +326,13 @@ export default function SessionDetailView() {
     if (!session || downloadingId) return;
     setDownloadingId(artifact.id);
     try {
-      const blob = await apiClient.download(`/v1/artifacts/${artifact.id}/content`);
+      // Deliverables live under the session-scoped files endpoints; artifacts
+      // (saved via save_artifact) under /v1/artifacts.
+      const endpoint =
+        artifact.source === 'deliverable'
+          ? `/v1/files/${artifact.id}/content`
+          : `/v1/artifacts/${artifact.id}/content`;
+      const blob = await apiClient.download(endpoint);
       downloadBlob(blob, artifact.filename);
     } catch (err) {
       setActionError((err as ApiError).message || t('detailFailedToDownloadArtifact'));
@@ -660,9 +672,9 @@ export default function SessionDetailView() {
 
       <section className="detail-section" data-testid="artifacts-section">
         <h2>{t('detailArtifacts')}</h2>
-        {artifacts === null ? (
+        {artifacts === null || deliverables === null ? (
           <LoadingSpinner />
-        ) : artifacts.length === 0 ? (
+        ) : artifacts.length === 0 && deliverables.length === 0 ? (
           <p className="empty-text">{t('detailNoArtifacts')}</p>
         ) : (
           <table className="resources-table">
@@ -670,15 +682,28 @@ export default function SessionDetailView() {
               <tr>
                 <th>{t('detailColumnFilename')}</th>
                 <th>{t('detailColumnSize')}</th>
+                <th>{t('detailColumnSource')}</th>
                 <th>{t('common:created')}</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {artifacts.map((a) => (
+              {[
+                ...artifacts,
+                // /v1/files already includes artifact-sourced records — skip
+                // them here so saved artifacts don't render twice.
+                ...deliverables.filter((d) => !artifacts.some((a) => a.id === d.id)),
+              ].map((a) => (
                 <tr key={a.id} data-testid="artifact-row">
                   <td data-testid="artifact-filename">{a.filename}</td>
                   <td>{formatBytes(a.size_bytes)}</td>
+                  <td data-testid="artifact-source">
+                    {a.source === 'deliverable'
+                      ? t('files:sourceDeliverable')
+                      : a.source === 'artifact'
+                        ? t('files:sourceArtifact')
+                        : t('files:sourceUpload')}
+                  </td>
                   <td>{new Date(a.created_at).toLocaleString(i18n.language)}</td>
                   <td>
                     <button

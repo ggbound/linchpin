@@ -147,12 +147,18 @@ async def lifespan(app: FastAPI):
 
     # Start background TTL cleanup task (Docker container expiry — skipped
     # together with the sandbox under LINCHPIN_SKIP_DOCKER)
+    # Background loops (TTL cleanup / lease supervisor / recovery) invoke the
+    # resolver with the session row only; bind app.state here to match the
+    # resolve_session_sandbox(app_state, session_row) signature.
+    async def _resolve_row_sandbox(row: Any) -> Any:
+        return await resolve_session_sandbox(app.state, row)
+
     if not skip_docker:
         ttl_task = asyncio.create_task(
             cleanup_expired_sessions(
                 app.state.sandbox,
                 app.state.orchestrator_tasks,
-                sandbox_resolver=resolve_session_sandbox,
+                sandbox_resolver=_resolve_row_sandbox,
             )
         )
         app.state.ttl_cleanup_task = ttl_task
@@ -219,7 +225,7 @@ async def lifespan(app: FastAPI):
                 app.state.orchestrator_tasks,
                 watcher_tasks=app.state.watcher_tasks,
                 spawn_watcher=watch_session_deliverables,
-                sandbox_resolver=resolve_session_sandbox,
+                sandbox_resolver=_resolve_row_sandbox,
             )
         )
     else:
@@ -235,7 +241,7 @@ async def lifespan(app: FastAPI):
             app.state.orchestrator_tasks,
             watcher_tasks=app.state.watcher_tasks,
             spawn_watcher=watch_session_deliverables,
-            sandbox_resolver=resolve_session_sandbox,
+            sandbox_resolver=_resolve_row_sandbox,
         )
 
     # Validate VAULT_ENCRYPTION_KEY early (warn, don't crash — key only

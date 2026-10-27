@@ -201,25 +201,94 @@ def _block_to_openai(block: dict) -> dict | None:
 
 
 def _convert_messages_for_openai(messages: list[dict]) -> list[dict]:
-    """Walk the message list and translate any structured-content
-    ``content: [...]`` field into the OpenAI shape. String content is
+    """Walk the message list and translate Anthropic-style structured
+    content into the OpenAI Chat Completions shape. String content is
     untouched. Returns a new list — the caller's messages are not
     mutated.
+
+    Tool-call history mapping (required — dropping these blocks makes
+    the model re-issue the same tool call every turn because it never
+    sees its prior calls or their results):
+    - assistant ``tool_use`` blocks → assistant ``tool_calls`` entries
+    - user ``tool_result`` blocks   → ``role: "tool"`` messages
+    - text/image blocks in list content → OpenAI content blocks
+
+    Consecutive assistant messages (text + tool call) are merged into a
+    single assistant turn so providers that require strict turn
+    alternation stay happy.
     """
     out: list[dict] = []
     for msg in messages:
+        role = msg.get("role")
         content = msg.get("content")
-        if isinstance(content, list):
-            new_content: list[dict] = []
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
+        if not isinstance(content, list):
+            out.append(msg)
+            continue
+
+        text_blocks: list[dict] = []
+        tool_calls: list[dict] = []
+        tool_results: list[dict] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "tool_use":
+                tool_input = block.get("input")
+                if tool_input is None:
+                    tool_input = block.get("tool_input") or {}
+                tool_calls.append({
+                    "id": block.get("id") or block.get("tool_use_id") or "",
+                    "type": "function",
+                    "function": {
+                        "name": block.get("name") or block.get("tool_name") or "",
+                        "arguments": _json.dumps(tool_input, ensure_ascii=False),
+                    },
+                })
+            elif btype == "tool_result":
+                tool_results.append(block)
+            else:
                 translated = _block_to_openai(block)
                 if translated is not None:
-                    new_content.append(translated)
-            out.append({**msg, "content": new_content})
-        else:
-            out.append(msg)
+                    text_blocks.append(translated)
+
+        if role == "assistant":
+            converted: dict = {"role": "assistant", "content": text_blocks or None}
+            if tool_calls:
+                converted["tool_calls"] = tool_calls
+            if out and out[-1].get("role") == "assistant":
+                prev = out[-1]
+                prev_content = prev.get("content")
+                prev_blocks = (
+                    [{"type": "text", "text": prev_content}]
+                    if isinstance(prev_content, str) and prev_content
+                    else list(prev_content or [])
+                )
+                merged_blocks = prev_blocks + (converted.get("content") or [])
+                prev["content"] = merged_blocks or None
+                prev["tool_calls"] = (prev.get("tool_calls") or []) + tool_calls
+            else:
+                out.append(converted)
+            continue
+
+        # Non-assistant roles: tool_result blocks become role:"tool"
+        # messages; any remaining text/image blocks stay with the
+        # original role.
+        for block in tool_results:
+            result_content = block.get("content")
+            if not isinstance(result_content, str):
+                result_content = (
+                    _json.dumps(result_content, ensure_ascii=False)
+                    if result_content is not None
+                    else ""
+                )
+            out.append({
+                "role": "tool",
+                "tool_call_id": block.get("tool_use_id") or block.get("tool_call_id") or "",
+                "content": result_content,
+            })
+        if text_blocks:
+            out.append({**msg, "content": text_blocks})
+
     return out
 
 

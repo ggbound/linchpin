@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useTranslation } from 'react-i18next';
 import { apiClient } from '../api/client';
@@ -186,6 +186,19 @@ export default function EventStreamPanel({ sessionId, sessionStatus }: EventStre
     scrollToBottom();
   }, [events, streamingMessages]);
 
+  // Tool-use ids that already have a user.tool_confirmation in the stream,
+  // so replayed requires_action cards render as resolved instead of pending.
+  const resolvedToolIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const e of events) {
+      if (e.type === 'user.tool_confirmation') {
+        const id = e.payload.tool_use_id;
+        if (typeof id === 'string' && id) ids.add(id);
+      }
+    }
+    return ids;
+  }, [events]);
+
   const renderEvent = (event: SessionEvent) => {
     const cls = eventTypeClass(event.type);
 
@@ -196,13 +209,16 @@ export default function EventStreamPanel({ sessionId, sessionStatus }: EventStre
 
     if (event.type === 'session.requires_action') {
       const toolName = (event.payload.tool_name as string) ?? t('unknownTool');
+      const toolUseId = (event.payload.tool_use_id as string) ?? '';
       const args = (event.payload.arguments as Record<string, unknown>) ?? {};
       return (
         <div key={event.cursor} className="event-bubble event-bubble--requires-action" data-testid="event-requires-action">
           <ToolConfirmationCard
             sessionId={sessionId}
             toolName={toolName}
+            toolUseId={toolUseId}
             arguments={args}
+            initiallyResolved={resolvedToolIds.has(toolUseId)}
             onResolved={() => {}}
           />
         </div>

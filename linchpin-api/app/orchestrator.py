@@ -506,6 +506,26 @@ async def _build_skills_system_block(agent: Agent) -> str:
     return render_skills_system_prompt_block(rendered)
 
 
+# v0.3.x — environment orientation block. The sandbox layout is invisible to
+# the model unless we tell it where things live: scratch space, deliverable
+# output, and user uploads. Without this, agents leave deliverables in the
+# working directory where they are lost when the sandbox is reclaimed.
+ENVIRONMENT_PROMPT_BLOCK = """\
+<linchpin:environment>
+You are running inside a Linchpin session sandbox. Filesystem conventions:
+
+- Working directory: /workspace — use it for scratch work, intermediate files,
+  clones, and builds. It is NOT persisted.
+- User deliverables: copy every file the user should receive into
+  /mnt/session/outputs/ (preserving meaningful filenames), or call the
+  save_artifact tool with the file's sandbox path. Both register the file as a
+  downloadable artifact visible to the user in the console.
+- User uploads: files the user attached are mounted at /mnt/session/uploads/.
+- The sandbox is ephemeral: anything left outside /mnt/session/outputs/ (or not
+  saved via save_artifact) is discarded when the sandbox is reclaimed.
+</linchpin:environment>"""
+
+
 async def build_context(session_id: str, agent: Agent) -> list[dict]:
     """Build the conversation messages list from the session event log.
 
@@ -549,7 +569,7 @@ async def build_context(session_id: str, agent: Agent) -> list[dict]:
     memory_block = await _build_memory_system_block(uid)
     skills_block = await _build_skills_system_block(agent)
     base_system = agent.system or ""
-    prelude_parts = [part for part in (skills_block, memory_block) if part]
+    prelude_parts = [part for part in (ENVIRONMENT_PROMPT_BLOCK, skills_block, memory_block) if part]
     if prelude_parts:
         prelude = "\n\n".join(prelude_parts)
         system = f"{prelude}\n\n{base_system}".rstrip() if base_system else prelude
@@ -717,6 +737,139 @@ async def build_context(session_id: str, agent: Agent) -> list[dict]:
 # Tool definitions builder
 # ---------------------------------------------------------------------------
 
+# Real descriptions + input schemas for built-in tools, mirroring the handler
+# signatures in app.tools. Keeping the model-facing contract accurate matters:
+# an empty schema makes the model unable to call the tool correctly.
+_BUILTIN_TOOL_SPECS: dict[str, dict] = {
+    "bash": {
+        "description": (
+            "Run a shell command inside the session sandbox and return its output. "
+            "Use for building, running, installing packages, and inspecting files."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The shell command to execute."},
+                "timeout": {"type": "integer", "description": "Optional timeout in seconds."},
+            },
+            "required": ["command"],
+        },
+    },
+    "read": {
+        "description": "Read the contents of a file in the sandbox and return them as text.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Absolute or sandbox-relative file path."},
+            },
+            "required": ["path"],
+        },
+    },
+    "write": {
+        "description": "Create or overwrite a file in the sandbox with the given content.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to write."},
+                "content": {"type": "string", "description": "Full file content."},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    "edit": {
+        "description": (
+            "Replace the first occurrence of old_text with new_text in an existing file. "
+            "The file must already exist."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to edit."},
+                "old_text": {"type": "string", "description": "Exact text to replace."},
+                "new_text": {"type": "string", "description": "Replacement text."},
+            },
+            "required": ["path", "old_text", "new_text"],
+        },
+    },
+    "glob": {
+        "description": "List files in the sandbox matching a glob pattern (implemented with find).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Glob pattern, e.g. \"*.py\" or \"src/**/*.ts\"."},
+                "path": {"type": "string", "description": "Directory to search. Defaults to the working directory."},
+            },
+            "required": ["pattern"],
+        },
+    },
+    "grep": {
+        "description": "Search file contents with a regular expression (implemented with ripgrep).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Regular expression to search for."},
+                "path": {"type": "string", "description": "File or directory to search. Defaults to the working directory."},
+                "include": {"type": "string", "description": "Optional glob filter for files, e.g. \"*.ts\"."},
+            },
+            "required": ["pattern"],
+        },
+    },
+    "web_fetch": {
+        "description": "Fetch a URL over HTTP and return the status code, headers, and response body.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The URL to fetch."},
+            },
+            "required": ["url"],
+        },
+    },
+    "web_search": {
+        "description": "Search the web and return a list of results with titles, URLs, and snippets.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query."},
+                "max_results": {"type": "integer", "description": "Maximum results to return (1-20, default 5)."},
+                "search_depth": {"type": "string", "description": "Search depth, e.g. \"basic\" or \"advanced\"."},
+            },
+            "required": ["query"],
+        },
+    },
+    "save_artifact": {
+        "description": (
+            "Persist a file produced in the sandbox as a session artifact so the user can "
+            "browse and download it from the console. Call this for every file you want to "
+            "deliver to the user. Duplicate saves of identical content are deduplicated."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path of the file inside the sandbox to save."},
+                "name": {"type": "string", "description": "Optional display name. Defaults to the file's basename."},
+            },
+            "required": ["path"],
+        },
+    },
+    "spawn_subagent": {
+        "description": "Spawn a worker thread handled by a declared subagent agent.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Which declared subagent to spawn."},
+                "input_message": {"type": "string", "description": "Task instruction for the worker thread."},
+            },
+            "required": ["name", "input_message"],
+        },
+    },
+}
+
+_PLACEHOLDER_TOOL_DEF = lambda name: {
+    "name": name,
+    "description": f"Built-in tool: {name}",
+    "input_schema": {"type": "object", "properties": {}},
+}
+
 
 def build_tool_definitions(agent: Agent) -> list[dict]:
     """Build the tool definitions list from the agent's tool config.
@@ -727,14 +880,23 @@ def build_tool_definitions(agent: Agent) -> list[dict]:
     tools: list[dict] = []
     for tool in agent.tools:
         if hasattr(tool, "configs"):
-            # BuiltinToolConfig
+            # BuiltinToolConfig — when a declared roster exists, spawn_subagent
+            # is emitted below with the roster enum, so skip the generic spec
+            # to avoid a duplicate tool name.
             for cfg in tool.configs:
-                if cfg.enabled:
+                if not cfg.enabled:
+                    continue
+                if cfg.name == "spawn_subagent" and agent.multi_agents:
+                    continue
+                spec = _BUILTIN_TOOL_SPECS.get(cfg.name)
+                if spec:
                     tools.append({
                         "name": cfg.name,
-                        "description": f"Built-in tool: {cfg.name}",
-                        "input_schema": {"type": "object", "properties": {}},
+                        "description": spec["description"],
+                        "input_schema": spec["input_schema"],
                     })
+                else:
+                    tools.append(_PLACEHOLDER_TOOL_DEF(cfg.name))
         elif hasattr(tool, "name"):
             # CustomToolConfig
             tools.append({

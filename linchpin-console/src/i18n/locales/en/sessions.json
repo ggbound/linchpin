@@ -53,6 +53,7 @@
   "detailNoArtifacts": "No artifacts produced by this session.",
   "detailColumnFilename": "Filename",
   "detailColumnSize": "Size",
+  "detailColumnSource": "Source",
   "detailOutcomeEvaluations": "Outcome Evaluations ({{total}})",
   "detailRecordEvaluation": "Record Evaluation",
   "detailScoreLabel": "Score (0–1)",
